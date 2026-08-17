@@ -1,5 +1,6 @@
 import { TerminalError, normalizeFailure } from './errors.mjs';
 import { FORWARD_TOOLS, FORWARD_TOOL_NAMES, callForwardTool } from './forward-tools.mjs';
+import { TERMINAL_HEALTH_TOOL, callTerminalHealthTool } from './health-tool.mjs';
 import { buildLegacyAliasTools, resolveLegacyAliasCall } from './legacy-aliases.mjs';
 import { remoteExec } from './remote-exec.mjs';
 import { REMOTE_FS_TOOLS, REMOTE_FS_TOOL_NAMES, callRemoteFsTool } from './remote-fs-tools.mjs';
@@ -168,6 +169,7 @@ export const LOCAL_TOOLS = Object.freeze([
   ...FORWARD_TOOLS,
   ...TASK_TOOLS,
   ...SYSTEM_TOOLS,
+  TERMINAL_HEALTH_TOOL,
 ]);
 
 export function buildToolCatalog({ upstreamTools = [], localTools = LOCAL_TOOLS } = {}) {
@@ -218,6 +220,7 @@ export async function callTool(
     forwardToolCallImpl = callForwardTool,
     taskToolCallImpl = callTaskTool,
     systemToolCallImpl = callSystemTool,
+    healthToolCallImpl = callTerminalHealthTool,
   },
 ) {
   if (name === REMOTE_EXEC_TOOL.name) {
@@ -278,6 +281,10 @@ export async function callTool(
     return systemToolCallImpl(name, args ?? {}, { upstreamClient });
   }
 
+  if (name === TERMINAL_HEALTH_TOOL.name) {
+    return healthToolCallImpl(args ?? {}, { upstreamClient });
+  }
+
   const legacy = resolveLegacyAliasCall(name, args ?? {});
   if (legacy) {
     return callTool(legacy.target, legacy.args, {
@@ -291,6 +298,7 @@ export async function callTool(
       forwardToolCallImpl,
       taskToolCallImpl,
       systemToolCallImpl,
+      healthToolCallImpl,
     });
   }
 

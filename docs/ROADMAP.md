@@ -135,17 +135,18 @@ Mutation tools default to `privilege:'user'` and never silently retry as root. T
 
 Live acceptance on the `taylan` test target proved ordinary `remote_exec` remained UID 1000, explicit root execution selected `docker_host_root` and returned UID 0, and normalized system, disk, GPU and `ssh.service` inspection succeeded without mutating production services.
 
-## M8 — Observability, fault injection, deployment
+## M8 — Observability, fault injection, deployment — implemented
 
-- server/upstream/remote compatibility health;
-- session/task/forward counters;
-- reconnect/failure counters;
-- bounded rotating logs;
-- watchdog targets for extension and upstream separately;
-- public OAuth deployment path;
-- forced transport-loss and process-restart acceptance suite;
-- stable-release checklist.
+- `terminal_health` reports extension/upstream/gateway health, lifecycle counts, reconnect/failure counters and optional target compatibility/session counts without exposing command/session payloads;
+- reconnect uses one in-flight promise with bounded exponential backoff + jitter and resets after successful functional `tools/list`;
+- arbitrary upstream tool calls are not replayed after ambiguous response loss, preserving at-most-once behavior for possible side effects; a definitive JSON-RPC `-32001 Session not found` is treated separately because the stale MCP session rejected the request before dispatch, so the client reconnects and retries exactly once;
+- structural/pattern secret redaction plus bounded diagnostics and redaction-first rotating JSONL logs are implemented;
+- deployed topology is gateway `9022` -> extension `9031` -> upstream `9021`, preserving the existing public OAuth resource and scope;
+- watchdog treats upstream, extension and gateway as separate restart domains;
+- the existing upstream persistence smoke also proves the extension recovers its functional tool catalog after upstream restart;
+- a 15-phase full acceptance suite verifies structured execution, alias semantics, host-key classification, persistence/reuse, simultaneous session isolation, filesystem, binary checksum transfer, resume/sync, forwarding, long-task wait, extension restart survival, gateway restart survival, root UID 0, redaction and reconnect-storm prevention;
+- final acceptance cleanup requires no leaked named sessions, tasks, forwards or remote `ai-tmux` sessions.
 
 ## Stable-release gate
 
-The first stable release requires all major tools to have deterministic tests and the live acceptance matrix to pass without known Critical/Important defects.
+The implementation side of the stable-release gate is satisfied: major tools have deterministic tests, the live 15-phase acceptance matrix passes, and no known Critical/Important defect is recorded. Remaining work is release packaging/versioning and burn-in/operational observation before declaring a stable version.

@@ -6,7 +6,7 @@ This project started from a fairly simple problem: most SSH MCP wrappers tie the
 
 Persistent Terminal MCP keeps those two things separate. Interactive sessions are backed by [`pty-mcp`](https://github.com/raychao-oao/pty-mcp) and remote `ai-tmux`; structured operations use native OpenSSH. If the local MCP process disappears, the remote PTY can stay alive and be attached again later.
 
-The repository is still pre-release. The core, structured filesystem, transfer/synchronization, managed-forward, persistent-task, explicit-root and system-management layers are working and tested; deeper observability and fault-injection/deployment work remains.
+The repository is still pre-release, but the planned core through observability/recovery surface is implemented and acceptance-tested. Stable-release work is now release packaging, documentation polish, and continued real-world burn-in rather than a missing major capability layer.
 
 ## What works now
 
@@ -48,10 +48,19 @@ The repository is still pre-release. The core, structured filesystem, transfer/s
 - controlled `process_signal` plus `service_start`, `service_stop` and `service_restart` operations with explicit `privilege:'user'` or `privilege:'root'`
 - no automatic privilege fallback for ordinary `remote_exec` or user-mode system mutations
 - live proof on a real Ubuntu target that ordinary execution remains non-root while explicit root execution reaches UID 0 and system inspection tools return normalized data
+- structural and pattern-based secret redaction for diagnostic payloads, including authorization/password/private-key markers and known prepared secrets
+- bounded reconnect/failure diagnostics that store counters rather than command/session payloads
+- a redaction-first JSONL logger with 10 MiB rotation and at most three rotated files
+- single-flight upstream reconnect with capped exponential backoff + jitter and reset after a successful functional `tools/list`
+- no replay after ambiguous upstream transport loss, avoiding duplicate side effects; the one safe exception is a definitive JSON-RPC `-32001 Session not found`, which proves the stale MCP session rejected the request and is reconnected/retried exactly once
+- canonical `terminal_health` for extension/upstream/gateway health, lifecycle counts, reconnect/failure counters, optional remote-session counts and per-target `ai-tmux` compatibility
+- live deployment behind the existing Persistent Terminal MCP identity with `9022 gateway -> 9031 extension -> 9021 pty-mcp`
+- watchdog isolation for upstream, extension and OAuth gateway as three separate failure domains
+- a named 15-phase full acceptance suite covering structured exec, persistence/reuse, isolation, filesystem, transfer/resume/sync, forwards, tasks, extension/gateway restart survival, root, host-key classification, redaction and reconnect-storm prevention
 - MCP output-schema checks for both successful and failed calls
 - secret-related upstream tools passed through without inspecting or rewriting their result
 
-The next work is tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md). In short: add deeper observability, failure injection and deployment hardening.
+The completed milestone map and remaining stable-release gate are tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## How it is put together
 
@@ -112,6 +121,8 @@ export PTY_UPSTREAM_URL=http://127.0.0.1:9021/mcp
 A remote command returning `3` is not the same thing as SSH failing. A stale local PTY handle is not a reason to kill the remote session. A reconnect is not a reason to create a second shell.
 
 Those distinctions are intentional and have regression tests. The recovery path checks the local handle first, then the recorded remote `ai-tmux` session, and creates a new remote session only after the old one is confirmed absent.
+
+New integrations should use canonical names such as `remote_exec`, `ensure_session`, `task_*`, `forward_*` and the structured remote/system tools. `ssh_exec`, `ssh_ensure_session` and `ssh_read_session` exist only as deprecated compatibility aliases for older clients.
 
 More detail is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/TESTING.md`](docs/TESTING.md).
 
