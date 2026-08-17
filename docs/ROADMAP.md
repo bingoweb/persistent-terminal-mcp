@@ -60,9 +60,9 @@ Optional SHA-256 verification streams the local file into a hash and obtains the
 
 Live acceptance covers a deterministic 32 MiB verified upload/download round-trip, an interrupted 48 MiB rsync resumed from a real partial remote file, and sync dry-run/exclude/delete behavior against a real OpenSSH target.
 
-## M5 — Port-forward lifecycle
+## M5 — Port-forward lifecycle — implemented
 
-Planned tools:
+Implemented tools:
 
 ```text
 forward_create
@@ -71,7 +71,13 @@ forward_status
 forward_close
 ```
 
-Support targets local `-L`, remote `-R`, and SOCKS `-D` forwarding with `ExitOnForwardFailure`, keepalive, and listener/tunnel health checks.
+Local `-L`, remote `-R`, and SOCKS `-D` forwards run as independent native `ssh -N` processes with `BatchMode`, `ExitOnForwardFailure` and keepalive options. Each managed forward has a stable generated ID plus an optional unique name.
+
+Lifecycle state is written only after a bounded startup gate and process-identity capture. Closing a forward verifies the recorded PID plus start/process identity before SIGTERM and verifies the identity again before any SIGKILL, so stale state or PID reuse cannot authorize killing an unrelated SSH process.
+
+Health combines process identity with actual listener state. Local and dynamic forwards use a bounded TCP connect probe; remote forwards query the remote target with a fixed `ss -ltnH` command and compare the expected bind/port. Healthy named forwards are reused rather than duplicated.
+
+Live acceptance starts a temporary loopback HTTP service on a real remote target, creates a named local forward, fetches HTTP through it, verifies healthy status and named reuse with the same ID/PID, closes it, confirms the listener is gone and verifies the persistent registry no longer contains the forward.
 
 ## M6 — Persistent task manager
 

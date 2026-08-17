@@ -6,7 +6,7 @@ This project started from a fairly simple problem: most SSH MCP wrappers tie the
 
 Persistent Terminal MCP keeps those two things separate. Interactive sessions are backed by [`pty-mcp`](https://github.com/raychao-oao/pty-mcp) and remote `ai-tmux`; structured operations use native OpenSSH. If the local MCP process disappears, the remote PTY can stay alive and be attached again later.
 
-The repository is still pre-release. The core, structured filesystem and transfer/synchronization layers are working and tested, while forwarding, task and system-management surfaces are still being built.
+The repository is still pre-release. The core, structured filesystem, transfer/synchronization and managed-forward layers are working and tested, while task and system-management surfaces are still being built.
 
 ## What works now
 
@@ -30,10 +30,15 @@ The repository is still pre-release. The core, structured filesystem and transfe
 - explicit rsync-only `remote_sync` with upload/download direction, excludes, dry-run and visible delete semantics
 - streaming local/remote SHA-256 verification with mismatch-specific integrity failures
 - observed resume reporting when a pre-existing partial remote file is actually present
+- managed native OpenSSH local (`-L`), remote (`-R`) and dynamic SOCKS (`-D`) forwards
+- stable forward IDs plus optional names with healthy named-forward reuse instead of duplicate SSH processes
+- forward lifecycle state persisted only after bounded startup and process-identity capture
+- identity-safe close semantics that re-check the recorded process before SIGTERM and before any SIGKILL
+- real local TCP and remote `ss` listener health checks rather than PID-only forward status
 - MCP output-schema checks for both successful and failed calls
 - secret-related upstream tools passed through without inspecting or rewriting their result
 
-The next work is tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md). In short: add managed port forwards, then persistent tasks, explicit privileged operations, system helpers and deeper fault-injection testing.
+The next work is tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md). In short: add persistent tasks, then explicit privileged operations, system helpers and deeper fault-injection testing.
 
 ## How it is put together
 
