@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
-import { createServer } from '../src/server.mjs';
+import { createProductionRuntime, createServer } from '../src/server.mjs';
 import { TerminalError } from '../src/errors.mjs';
 
 test('MCP initialize/list/call exposes upstream tools plus canonical local tools through one server', async (t) => {
@@ -98,6 +98,48 @@ test('MCP initialize/list/call exposes upstream tools plus canonical local tools
     name: 'create_ssh_session',
     args: { host: 'test-host', user: 'tester' },
   }]);
+});
+
+test('production runtime wires the rotating diagnostic logger into the upstream client', async (t) => {
+  const logger = Object.freeze({
+    info: async () => {},
+    warn: async () => {},
+    error: async () => {},
+    close: async () => {},
+  });
+  let loggerOptions;
+  let upstreamOptions;
+
+  class FakeUpstreamClient {
+    constructor(options) {
+      upstreamOptions = options;
+    }
+
+    async listTools() {
+      return { tools: [] };
+    }
+
+    async callTool() {
+      throw new Error('not used');
+    }
+  }
+
+  const runtime = createProductionRuntime({
+    homeDir: '/tmp/persistent-terminal-release-test',
+    loggerFactory(options) {
+      loggerOptions = options;
+      return logger;
+    },
+    UpstreamClientImpl: FakeUpstreamClient,
+  });
+  t.after(async () => runtime.server.close());
+
+  assert.equal(
+    runtime.logPath,
+    '/tmp/persistent-terminal-release-test/.local/share/persistent-terminal-extended/diagnostics.jsonl',
+  );
+  assert.deepEqual(loggerOptions, { path: runtime.logPath });
+  assert.equal(upstreamOptions.logger, logger);
 });
 
 test('remote_exec normalized failures satisfy the advertised MCP output schema', async (t) => {

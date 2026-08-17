@@ -8,6 +8,7 @@ import {
   getTerminalHealth,
 } from '../src/health-tool.mjs';
 import { LOCAL_TOOLS, callTool } from '../src/tool-registry.mjs';
+import { VERSION } from '../src/version.mjs';
 
 function toolJson(value) {
   return {
@@ -28,6 +29,22 @@ test('terminal_health publishes a closed non-secret diagnostic schema and is can
     default: [],
   });
   assert.equal(LOCAL_TOOLS.some((tool) => tool.name === 'terminal_health'), true);
+});
+
+test('terminal health default extension version follows package release metadata', async () => {
+  const result = await getTerminalHealth({}, {
+    diagnostics: createDiagnostics(),
+    upstreamClient: {
+      async listTools() { return { tools: [] }; },
+      getServerVersion() { return { name: 'pty-mcp', version: 'test' }; },
+    },
+    stateStore: {
+      async read() { return { version: 1, sessions: {}, tasks: {}, forwards: {} }; },
+    },
+    fetchImpl: async () => ({ ok: true, async json() { return { ok: true }; } }),
+  });
+
+  assert.equal(result.extension.version, VERSION);
 });
 
 test('terminal health combines upstream, persisted lifecycle counts, gateway, target compatibility, and diagnostics', async () => {

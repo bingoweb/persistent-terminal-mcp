@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v0.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: verify and publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout exact tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.23.1"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run project quality gate
+        run: npm run quality
+
+      - name: Audit production dependency vulnerabilities
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Verify release metadata and exact tag
+        run: npm run release:check -- --require-tag
+
+      - name: Build and clean-install release artifacts
+        run: npm run release:artifacts
+
+      - name: Verify release checksums
+        working-directory: dist
+        run: sha256sum -c SHA256SUMS
+
+      - name: Publish immutable-version release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/persistent-terminal-mcp-*.tgz \
+            dist/persistent-terminal-mcp-*-source.tar.gz \
+            dist/persistent-terminal-mcp-*.cdx.json \
+            dist/SHA256SUMS \
+            --verify-tag \
+            --title "Persistent Terminal MCP $GITHUB_REF_NAME" \
+            --notes-file "docs/releases/${GITHUB_REF_NAME}.md"
+

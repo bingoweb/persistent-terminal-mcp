@@ -149,4 +149,4 @@ Live acceptance on the `taylan` test target proved ordinary `remote_exec` remain
 
 ## Stable-release gate
 
-The implementation side of the stable-release gate is satisfied: major tools have deterministic tests, the live 15-phase acceptance matrix passes, and no known Critical/Important defect is recorded. Remaining work is release packaging/versioning and burn-in/operational observation before declaring a stable version.
+The implementation side of the stable-release gate is satisfied: major tools have deterministic tests, the live 15-phase acceptance matrix passes, and no known Critical/Important defect is recorded. The first stable pre-1.0 version is `0.9.0`. Release engineering adds a restricted runtime package, standalone source archive, CycloneDX SBOM, SHA-256 checksums, clean-install smoke, version consistency checks, retained rollback runtime, and a tag-only GitHub Release workflow. The release is not considered published until the exact `v0.9.0` tree passes deployment, live acceptance, burn-in, and public artifact verification.

@@ -1,3 +1,5 @@
+import os from 'node:os';
+import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -7,6 +9,8 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { PtyUpstreamClient } from './upstream-pty.mjs';
 import { buildToolCatalog, callTool } from './tool-registry.mjs';
 import { remoteExec } from './remote-exec.mjs';
+import { createJsonlLogger } from './logger.mjs';
+import { VERSION } from './version.mjs';
 
 export function createServer({
   upstreamClient = new PtyUpstreamClient(),
@@ -17,7 +21,7 @@ export function createServer({
   healthToolCallImpl,
 } = {}) {
   const server = new Server(
-    { name: 'persistent-terminal-extended', version: '0.1.0' },
+    { name: 'persistent-terminal-extended', version: VERSION },
     { capabilities: { tools: {} } },
   );
 
@@ -59,8 +63,22 @@ export function createServer({
   return server;
 }
 
+export function createProductionRuntime({
+  homeDir = os.homedir(),
+  env = process.env,
+  loggerFactory = createJsonlLogger,
+  UpstreamClientImpl = PtyUpstreamClient,
+} = {}) {
+  const logPath = env.PTEXT_LOG_PATH
+    ?? path.join(homeDir, '.local', 'share', 'persistent-terminal-extended', 'diagnostics.jsonl');
+  const logger = loggerFactory({ path: logPath });
+  const upstreamClient = new UpstreamClientImpl({ logger });
+  const server = createServer({ upstreamClient });
+  return Object.freeze({ server, logger, upstreamClient, logPath });
+}
+
 export async function main() {
-  const server = createServer();
+  const { server } = createProductionRuntime();
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
