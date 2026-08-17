@@ -1,6 +1,7 @@
 import { TerminalError, normalizeFailure } from './errors.mjs';
 import { buildLegacyAliasTools, resolveLegacyAliasCall } from './legacy-aliases.mjs';
 import { remoteExec } from './remote-exec.mjs';
+import { REMOTE_FS_TOOLS, REMOTE_FS_TOOL_NAMES, callRemoteFsTool } from './remote-fs-tools.mjs';
 import { SESSION_TOOLS, SESSION_TOOL_NAMES, callSessionTool } from './session-tools.mjs';
 
 export const REMOTE_EXEC_TOOL = Object.freeze({
@@ -67,7 +68,7 @@ export const REMOTE_EXEC_TOOL = Object.freeze({
   },
 });
 
-export const LOCAL_TOOLS = Object.freeze([REMOTE_EXEC_TOOL, ...SESSION_TOOLS]);
+export const LOCAL_TOOLS = Object.freeze([REMOTE_EXEC_TOOL, ...SESSION_TOOLS, ...REMOTE_FS_TOOLS]);
 
 export function buildToolCatalog({ upstreamTools = [], localTools = LOCAL_TOOLS } = {}) {
   const names = new Set();
@@ -111,6 +112,7 @@ export async function callTool(
     upstreamToolNames,
     remoteExecImpl = remoteExec,
     sessionToolCallImpl = callSessionTool,
+    remoteFsToolCallImpl = callRemoteFsTool,
   },
 ) {
   if (name === REMOTE_EXEC_TOOL.name) {
@@ -134,6 +136,10 @@ export async function callTool(
     return sessionToolCallImpl(name, args ?? {}, { upstreamClient });
   }
 
+  if (REMOTE_FS_TOOL_NAMES.has(name)) {
+    return remoteFsToolCallImpl(name, args ?? {});
+  }
+
   const legacy = resolveLegacyAliasCall(name, args ?? {});
   if (legacy) {
     return callTool(legacy.target, legacy.args, {
@@ -141,6 +147,7 @@ export async function callTool(
       upstreamToolNames,
       remoteExecImpl,
       sessionToolCallImpl,
+      remoteFsToolCallImpl,
     });
   }
 
