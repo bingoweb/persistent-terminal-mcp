@@ -42,9 +42,9 @@ The filesystem protocol sends paths and text as structured JSON data rather than
 
 Live acceptance covers write/read, SHA-256 conflict preservation, patch, grep, find, move, list and cleanup against a real OpenSSH target.
 
-## M4 — Transfer and synchronization
+## M4 — Transfer and synchronization — implemented
 
-Planned tools:
+Implemented tools:
 
 ```text
 remote_upload
@@ -52,7 +52,13 @@ remote_download
 remote_sync
 ```
 
-Requirements include recursive transfer, large-file handling, resume when supported, progress metadata, and SHA-256 integrity verification.
+`remote_upload` and `remote_download` operate on filesystem paths rather than file bytes in MCP payloads. Simple copies can use scp; resumable copies use rsync with partial-file support and bounded progress metadata. Caller-provided paths remain argv/data values rather than generated shell source.
+
+`remote_sync` is explicitly rsync-only and does not silently fall back to scp. It supports upload/download direction, recursive traversal, excludes, dry-run and visible delete semantics. Missing remote rsync is reported as `missing_remote_capability`.
+
+Optional SHA-256 verification streams the local file into a hash and obtains the remote digest with a fixed `sha256sum` command plus structured environment data. Successful transfers expose only `verified_sha256:true`; mismatches raise `checksum_integrity_failure` with both digests for diagnosis. Resume reporting is evidence-based when a pre-existing partial remote file can be observed.
+
+Live acceptance covers a deterministic 32 MiB verified upload/download round-trip, an interrupted 48 MiB rsync resumed from a real partial remote file, and sync dry-run/exclude/delete behavior against a real OpenSSH target.
 
 ## M5 — Port-forward lifecycle
 
