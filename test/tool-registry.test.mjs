@@ -2,11 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  LOCAL_TOOLS,
   REMOTE_EXEC_TOOL,
   buildToolCatalog,
   callTool,
 } from '../src/tool-registry.mjs';
 import { SESSION_TOOLS } from '../src/session-tools.mjs';
+
+function withoutAnnotations(tool) {
+  const { annotations: _annotations, ...rest } = tool;
+  return rest;
+}
 
 const SECRET_TOOL_NAMES = [
   'prepare_secret',
@@ -30,14 +36,18 @@ test('catalog contains upstream tools plus all canonical local tools without rew
   assert(catalog.some((tool) => tool.name === 'create_ssh_session'));
   assert(catalog.some((tool) => tool.name === 'remote_exec'));
   for (const tool of SESSION_TOOLS) {
-    assert.deepEqual(catalog.find((item) => item.name === tool.name), tool);
+    const published = catalog.find((item) => item.name === tool.name);
+    assert.deepEqual(withoutAnnotations(published), tool);
+    assert.deepEqual(published.annotations, LOCAL_TOOLS.find((item) => item.name === tool.name).annotations);
   }
   for (const name of SECRET_TOOL_NAMES) {
     const original = upstreamTools.find((tool) => tool.name === name);
     const published = catalog.find((tool) => tool.name === name);
     assert.deepEqual(published, original);
   }
-  assert.deepEqual(catalog.find((tool) => tool.name === 'remote_exec'), REMOTE_EXEC_TOOL);
+  const remoteExec = catalog.find((tool) => tool.name === 'remote_exec');
+  assert.deepEqual(withoutAnnotations(remoteExec), REMOTE_EXEC_TOOL);
+  assert.deepEqual(remoteExec.annotations, LOCAL_TOOLS.find((tool) => tool.name === 'remote_exec').annotations);
 });
 
 test('catalog rejects an upstream/local tool name collision', () => {

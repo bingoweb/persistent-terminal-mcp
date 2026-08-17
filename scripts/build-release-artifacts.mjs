@@ -11,6 +11,7 @@ import {
   renderSha256Sums,
   verifyPackEntries,
   verifySourceEntries,
+  verifySourceReleaseMetadata,
 } from './release-lib.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -130,6 +131,29 @@ async function main() {
     .split('\n')
     .filter(Boolean);
   verifySourceEntries(sourceEntries, { prefix: sourcePrefix });
+  const archivedPackageRaw = run(
+    'tar',
+    ['-xOzf', sourcePath, `${sourcePrefix}package.json`],
+    { capture: true },
+  );
+  let archivedPackageJson;
+  try {
+    archivedPackageJson = JSON.parse(archivedPackageRaw);
+  } catch (error) {
+    throw new Error(`source archive package.json is malformed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const archivedChangelog = run(
+    'tar',
+    ['-xOzf', sourcePath, `${sourcePrefix}CHANGELOG.md`],
+    { capture: true },
+  );
+  verifySourceReleaseMetadata({
+    version,
+    prefix: sourcePrefix,
+    entries: sourceEntries,
+    packageJson: archivedPackageJson,
+    changelog: archivedChangelog,
+  });
 
   const smokeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'persistent-terminal-release-'));
   try {

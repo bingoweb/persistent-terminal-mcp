@@ -1,5 +1,10 @@
 import { TerminalError } from './errors.mjs';
 import { remoteExec } from './remote-exec.mjs';
+import {
+  parseSystemdStatusOutput,
+  systemdUnitStatus,
+  validateSystemdUnit,
+} from './systemd-core.mjs';
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 262_144;
@@ -8,7 +13,6 @@ const DEFAULT_LIST_LIMIT = 100;
 const MAX_LIST_LIMIT = 200;
 const DEFAULT_JOURNAL_LINES = 100;
 const MAX_JOURNAL_LINES = 500;
-const SERVICE_UNIT = /^[A-Za-z0-9_.@:-]+\.service$/u;
 
 const SYSTEM_INFO_COMMAND = [
   `printf 'hostname=%s\\n' "$(hostname)"`,
@@ -20,17 +24,6 @@ const SYSTEM_INFO_COMMAND = [
   `printf 'os_pretty=%s\\n' "$PRETTY_NAME"`,
   `awk '{printf "uptime_seconds=%s\\n", $1}' /proc/uptime`,
 ].join('; ');
-
-const SERVICE_STATUS_COMMAND = [
-  'systemctl show --no-pager',
-  '--property=Id',
-  '--property=LoadState',
-  '--property=ActiveState',
-  '--property=SubState',
-  '--property=UnitFileState',
-  '--property=MainPID',
-  '"$PTEXT_SERVICE"',
-].join(' ');
 
 const NVIDIA_QUERY_COMMAND = [
   'nvidia-smi',
@@ -63,13 +56,22 @@ function validateInteger(value, field, fallback, maximum) {
 }
 
 export function validateServiceUnit(service) {
-  if (typeof service !== 'string' || !SERVICE_UNIT.test(service)) {
+  let unit;
+  try {
+    unit = validateSystemdUnit(service);
+  } catch {
     throw new TerminalError(
       'validation_error',
       'service must be an exact .service unit name containing only safe systemd unit characters',
     );
   }
-  return service;
+  if (!unit.endsWith('.service')) {
+    throw new TerminalError(
+      'validation_error',
+      'service must be an exact .service unit name containing only safe systemd unit characters',
+    );
+  }
+  return unit;
 }
 
 function malformed(label, details) {
@@ -238,17 +240,21 @@ export function parsePortListOutput(stdout) {
 }
 
 export function parseServiceStatusOutput(stdout) {
-  const values = keyValueLines(stdout);
-  for (const key of ['Id', 'LoadState', 'ActiveState', 'SubState', 'MainPID']) {
-    if (!values.has(key)) throw malformed('service_status', { missing: key });
+  let parsed;
+  try {
+    parsed = parseSystemdStatusOutput(stdout);
+    validateServiceUnit(parsed.unit);
+  } catch (error) {
+    if (error instanceof TerminalError) throw malformed('service_status', { message: error.message });
+    throw error;
   }
   return {
-    service: values.get('Id'),
-    load_state: values.get('LoadState'),
-    active_state: values.get('ActiveState'),
-    sub_state: values.get('SubState'),
-    unit_file_state: values.get('UnitFileState') || null,
-    main_pid: numberField(values.get('MainPID'), 'service MainPID', { integer: true }),
+    service: parsed.unit,
+    load_state: parsed.load_state,
+    active_state: parsed.active_state,
+    sub_state: parsed.sub_state,
+    unit_file_state: parsed.unit_file_state,
+    main_pid: parsed.main_pid,
   };
 }
 
@@ -335,15 +341,17 @@ export async function portList(request, { remoteExecImpl = remoteExec } = {}) {
 export async function serviceStatus(request, { remoteExecImpl = remoteExec } = {}) {
   const target = validateRequest(request, 'service_status');
   const service = validateServiceUnit(request.service);
-  const execution = await execute(target, SERVICE_STATUS_COMMAND, {
-    remoteExecImpl,
-    label: 'service_status',
-    env: { PTEXT_SERVICE: service },
-  });
+  const generic = await systemdUnitStatus({ target, unit: service }, { remoteExecImpl });
   return {
     target,
-    ...parseServiceStatusOutput(execution.stdout),
-    ...rawContext(execution.stdout),
+    service: generic.unit,
+    load_state: generic.load_state,
+    active_state: generic.active_state,
+    sub_state: generic.sub_state,
+    unit_file_state: generic.unit_file_state,
+    main_pid: generic.main_pid,
+    raw: generic.raw,
+    raw_truncated: generic.raw_truncated,
   };
 }
 

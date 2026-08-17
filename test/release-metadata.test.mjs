@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const packageUrl = new URL('../package.json', import.meta.url);
 const lockUrl = new URL('../package-lock.json', import.meta.url);
+const EXPECTED_RELEASE = '0.11.0';
 
 async function readJson(url) {
   return JSON.parse(await fs.readFile(url, 'utf8'));
@@ -13,7 +14,7 @@ test('current release version is single-source across package, lock, and runtime
   const packageJson = await readJson(packageUrl);
   const packageLock = await readJson(lockUrl);
 
-  assert.equal(packageJson.version, '0.10.0');
+  assert.equal(packageJson.version, EXPECTED_RELEASE);
   assert.equal(packageLock.version, packageJson.version);
   assert.equal(packageLock.packages[''].version, packageJson.version);
 
@@ -47,5 +48,15 @@ test('current release documentation and verification command are present and con
   assert.match(releaseNotes, /SHA-256/iu);
   assert.match(releaseNotes, /CycloneDX/iu);
   assert.match(releaseNotes, /rollback/iu);
+  for (const marker of [
+    'ControlMaster',
+    'target_diagnose',
+    'Privilege Engine 2.0',
+    'systemd',
+    'admin_transaction',
+    'readOnlyHint',
+    'terminal_health',
+    'OAuth',
+  ]) assert.match(releaseNotes, new RegExp(marker.replaceAll('.', '\\.'), 'iu'));
 });
 

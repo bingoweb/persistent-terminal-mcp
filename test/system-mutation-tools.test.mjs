@@ -222,8 +222,9 @@ test('service mutation tools require exact .service names and user-mode command 
     );
     assert.equal(calls.length, 1);
     assert.equal(calls[0].env.LC_ALL, 'C');
-    assert.equal(calls[0].env.PTEXT_SERVICE, 'ssh.service');
-    assert.equal(calls[0].command, `systemctl ${action} "$PTEXT_SERVICE"`);
+    assert.equal(calls[0].env.PTEXT_ACTION, action);
+    assert.equal(calls[0].env.PTEXT_UNIT, 'ssh.service');
+    assert.equal(calls[0].command, 'systemctl --no-ask-password "$PTEXT_ACTION" "$PTEXT_UNIT"');
     assert.equal(calls[0].command.includes('ssh.service'), false);
     assert.equal(response.structuredContent.action, action);
     assert.equal(response.structuredContent.service, 'ssh.service');
@@ -251,7 +252,10 @@ test('explicit root service mutation uses only best-effort root provider with va
     },
   );
 
-  assert.deepEqual(calls, [{ target: 'taylan', command: 'systemctl restart ssh.service' }]);
+  assert.deepEqual(calls, [{
+    target: 'taylan',
+    command: `/bin/bash -lc 'systemctl --no-ask-password "$1" "$2"' ptext-systemd 'restart' 'ssh.service'`,
+  }]);
   assert.equal(response.structuredContent.action, 'restart');
   assert.equal(response.structuredContent.service, 'ssh.service');
   assert.equal(response.structuredContent.privilege, 'root');

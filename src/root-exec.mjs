@@ -18,6 +18,14 @@ const STRATEGIES = Object.freeze({
   SUDO_PASSWORD: 'sudo_password',
   SU_PASSWORD: 'su_root_password',
 });
+const DEFAULT_PROVIDER_ORDER = Object.freeze([
+  STRATEGIES.DIRECT,
+  STRATEGIES.SUDO_NOPASSWD,
+  STRATEGIES.DOCKER,
+  STRATEGIES.SUDO_PASSWORD,
+  STRATEGIES.SU_PASSWORD,
+]);
+const PROVIDER_SET = new Set(DEFAULT_PROVIDER_ORDER);
 
 function validateRequest(request) {
   if (request === null || typeof request !== 'object' || Array.isArray(request)) {
@@ -44,6 +52,48 @@ function validateRequest(request) {
   ) {
     throw new TerminalError('validation_error', 'max_output_bytes must be a positive integer');
   }
+}
+
+function validateProviderOrder(providerOrder) {
+  if (providerOrder === undefined) return DEFAULT_PROVIDER_ORDER;
+  if (!Array.isArray(providerOrder) || providerOrder.length === 0) {
+    throw new TerminalError('validation_error', 'providerOrder must be a non-empty array of known root providers');
+  }
+  const seen = new Set();
+  const normalized = [];
+  for (const provider of providerOrder) {
+    if (typeof provider !== 'string' || !PROVIDER_SET.has(provider)) {
+      throw new TerminalError('validation_error', `Unknown root provider in providerOrder: ${provider}`);
+    }
+    if (seen.has(provider)) {
+      throw new TerminalError('validation_error', `Duplicate root provider in providerOrder: ${provider}`);
+    }
+    seen.add(provider);
+    normalized.push(provider);
+  }
+  return Object.freeze(normalized);
+}
+
+function validateCapabilityHint(capabilityHint) {
+  if (capabilityHint === undefined) return null;
+  if (capabilityHint === null || typeof capabilityHint !== 'object' || Array.isArray(capabilityHint)) {
+    throw new TerminalError('validation_error', 'capabilityHint must be an object keyed by known root providers');
+  }
+  const normalized = {};
+  for (const [provider, available] of Object.entries(capabilityHint)) {
+    if (!PROVIDER_SET.has(provider)) {
+      throw new TerminalError('validation_error', `Unknown root provider in capabilityHint: ${provider}`);
+    }
+    if (typeof available !== 'boolean') {
+      throw new TerminalError('validation_error', `capabilityHint.${provider} must be a boolean`);
+    }
+    normalized[provider] = available;
+  }
+  return Object.freeze(normalized);
+}
+
+function providerKnownUnavailable(capabilityHint, strategy) {
+  return capabilityHint?.[strategy] === false;
 }
 
 function tokenDefault() {
@@ -327,9 +377,13 @@ export async function remoteRootExec(
     upstreamClient,
     resolveTargetImpl = resolveTarget,
     randomTokenImpl = tokenDefault,
+    providerOrder,
+    capabilityHint,
   } = {},
 ) {
   validateRequest(request);
+  const providers = validateProviderOrder(providerOrder);
+  const capabilities = validateCapabilityHint(capabilityHint);
   const target = request.target.trim();
   const attempts = [];
 
@@ -341,91 +395,114 @@ export async function remoteRootExec(
     );
   }
 
-  const directProbe = await capability(remoteExecImpl, target, 'id -u');
-  if (directProbe.timed_out) {
-    throw new TerminalError('timeout', `Root identity probe timed out for target: ${target}`, {
-      retryable: true,
-      details: { target, attempts },
-    });
-  }
-  if (directProbe.exit_code === 0 && directProbe.stdout.trim() === '0') {
-    attempt(attempts, STRATEGIES.DIRECT, 'selected');
-    const executed = await remoteExecImpl(executionRequest(request, target, request.command));
-    return resultFromExecution(STRATEGIES.DIRECT, target, executed, attempts);
-  }
-  attempt(attempts, STRATEGIES.DIRECT, 'unavailable');
+  let sudoAvailable;
+  const ensureSudoAvailability = async () => {
+    if (sudoAvailable !== undefined) return sudoAvailable;
+    const sudoProbe = await capability(remoteExecImpl, target, 'command -v sudo >/dev/null 2>&1');
+    sudoAvailable = sudoProbe.exit_code === 0 && !sudoProbe.timed_out;
+    return sudoAvailable;
+  };
 
-  const sudoProbe = await capability(remoteExecImpl, target, 'command -v sudo >/dev/null 2>&1');
-  const sudoAvailable = sudoProbe.exit_code === 0 && !sudoProbe.timed_out;
-  if (sudoAvailable) {
-    const sudoNopasswd = await capability(remoteExecImpl, target, 'sudo -n -- /bin/bash -lc true');
-    if (sudoNopasswd.exit_code === 0 && !sudoNopasswd.timed_out) {
-      attempt(attempts, STRATEGIES.SUDO_NOPASSWD, 'selected');
-      const executed = await remoteExecImpl(executionRequest(
-        request,
+  for (const strategy of providers) {
+    if (providerKnownUnavailable(capabilities, strategy)) continue;
+
+    if (strategy === STRATEGIES.DIRECT) {
+      const directProbe = await capability(remoteExecImpl, target, 'id -u');
+      if (directProbe.timed_out) {
+        throw new TerminalError('timeout', `Root identity probe timed out for target: ${target}`, {
+          retryable: true,
+          details: { target, attempts },
+        });
+      }
+      if (directProbe.exit_code === 0 && directProbe.stdout.trim() === '0') {
+        attempt(attempts, STRATEGIES.DIRECT, 'selected');
+        const executed = await remoteExecImpl(executionRequest(request, target, request.command));
+        return resultFromExecution(STRATEGIES.DIRECT, target, executed, attempts);
+      }
+      attempt(attempts, STRATEGIES.DIRECT, 'unavailable');
+      continue;
+    }
+
+    if (strategy === STRATEGIES.SUDO_NOPASSWD) {
+      if (await ensureSudoAvailability()) {
+        const sudoNopasswd = await capability(remoteExecImpl, target, 'sudo -n -- /bin/bash -lc true');
+        if (sudoNopasswd.exit_code === 0 && !sudoNopasswd.timed_out) {
+          attempt(attempts, STRATEGIES.SUDO_NOPASSWD, 'selected');
+          const executed = await remoteExecImpl(executionRequest(
+            request,
+            target,
+            sudoNoPasswordCommand(request.command),
+          ));
+          return resultFromExecution(STRATEGIES.SUDO_NOPASSWD, target, executed, attempts);
+        }
+      }
+      attempt(attempts, STRATEGIES.SUDO_NOPASSWD, 'unavailable');
+      continue;
+    }
+
+    if (strategy === STRATEGIES.DOCKER) {
+      const dockerProbe = await capability(remoteExecImpl, target, 'command -v docker >/dev/null 2>&1');
+      if (dockerProbe.exit_code === 0 && !dockerProbe.timed_out) {
+        const dockerRootProof = await capability(remoteExecImpl, target, dockerHostRootCommand('id -u'));
+        if (dockerRootProof.exit_code === 0 && dockerRootProof.stdout.trim() === '0' && !dockerRootProof.timed_out) {
+          attempt(attempts, STRATEGIES.DOCKER, 'selected');
+          const executed = await remoteExecImpl(executionRequest(
+            request,
+            target,
+            dockerHostRootCommand(request.command),
+          ));
+          return resultFromExecution(STRATEGIES.DOCKER, target, executed, attempts);
+        }
+      }
+      attempt(attempts, STRATEGIES.DOCKER, 'unavailable');
+      continue;
+    }
+
+    if (strategy === STRATEGIES.SUDO_PASSWORD) {
+      if (!await ensureSudoAvailability()) continue;
+      const sudoPassword = await interactivePasswordProvider({
+        strategy: STRATEGIES.SUDO_PASSWORD,
         target,
-        sudoNoPasswordCommand(request.command),
-      ));
-      return resultFromExecution(STRATEGIES.SUDO_NOPASSWD, target, executed, attempts);
-    }
-  }
-  attempt(attempts, STRATEGIES.SUDO_NOPASSWD, 'unavailable');
-
-  const dockerProbe = await capability(remoteExecImpl, target, 'command -v docker >/dev/null 2>&1');
-  if (dockerProbe.exit_code === 0 && !dockerProbe.timed_out) {
-    const dockerRootProof = await capability(remoteExecImpl, target, dockerHostRootCommand('id -u'));
-    if (dockerRootProof.exit_code === 0 && dockerRootProof.stdout.trim() === '0' && !dockerRootProof.timed_out) {
-      attempt(attempts, STRATEGIES.DOCKER, 'selected');
-      const executed = await remoteExecImpl(executionRequest(
         request,
-        target,
-        dockerHostRootCommand(request.command),
-      ));
-      return resultFromExecution(STRATEGIES.DOCKER, target, executed, attempts);
+        upstreamClient,
+        resolveTargetImpl,
+        randomTokenImpl,
+        promptText: `Enter sudo password for ${target}:`,
+        promptPattern: (token) => `__PTEXT_ROOT_PASSWORD_${token}__`,
+        commandBuilder: (rootSource, token, outer) => {
+          const prompt = `__PTEXT_ROOT_PASSWORD_${token}__`;
+          return `sudo -S -p ${quotePosix(prompt)} -- /bin/bash -lc ${quotePosix(rootSource)}; __ptext_outer=$?; printf '\\n${outer}%s\\n' "$__ptext_outer"`;
+        },
+      });
+      if (sudoPassword.available) {
+        attempt(attempts, STRATEGIES.SUDO_PASSWORD, 'selected');
+        return resultFromExecution(STRATEGIES.SUDO_PASSWORD, target, sudoPassword.executed, attempts);
+      }
+      attempt(attempts, STRATEGIES.SUDO_PASSWORD, 'unavailable');
+      continue;
     }
-  }
-  attempt(attempts, STRATEGIES.DOCKER, 'unavailable');
 
-  if (sudoAvailable) {
-    const sudoPassword = await interactivePasswordProvider({
-      strategy: STRATEGIES.SUDO_PASSWORD,
-      target,
-      request,
-      upstreamClient,
-      resolveTargetImpl,
-      randomTokenImpl,
-      promptText: `Enter sudo password for ${target}:`,
-      promptPattern: (token) => `__PTEXT_ROOT_PASSWORD_${token}__`,
-      commandBuilder: (rootSource, token, outer) => {
-        const prompt = `__PTEXT_ROOT_PASSWORD_${token}__`;
-        return `sudo -S -p ${quotePosix(prompt)} -- /bin/bash -lc ${quotePosix(rootSource)}; __ptext_outer=$?; printf '\\n${outer}%s\\n' "$__ptext_outer"`;
-      },
-    });
-    if (sudoPassword.available) {
-      attempt(attempts, STRATEGIES.SUDO_PASSWORD, 'selected');
-      return resultFromExecution(STRATEGIES.SUDO_PASSWORD, target, sudoPassword.executed, attempts);
+    if (strategy === STRATEGIES.SU_PASSWORD) {
+      const suProbe = await capability(remoteExecImpl, target, 'command -v su >/dev/null 2>&1');
+      if (suProbe.exit_code === 0 && !suProbe.timed_out) {
+        const suPassword = await interactivePasswordProvider({
+          strategy: STRATEGIES.SU_PASSWORD,
+          target,
+          request,
+          upstreamClient,
+          resolveTargetImpl,
+          randomTokenImpl,
+          promptText: `Enter root password for ${target}:`,
+          promptPattern: 'Password:',
+          commandBuilder: (rootSource, _token, outer) => `LC_ALL=C su - root -c ${quotePosix(`/bin/bash -lc ${quotePosix(rootSource)}`)}; __ptext_outer=$?; printf '\\n${outer}%s\\n' "$__ptext_outer"`,
+        });
+        if (suPassword.available) {
+          attempt(attempts, STRATEGIES.SU_PASSWORD, 'selected');
+          return resultFromExecution(STRATEGIES.SU_PASSWORD, target, suPassword.executed, attempts);
+        }
+        attempt(attempts, STRATEGIES.SU_PASSWORD, 'unavailable');
+      }
     }
-    attempt(attempts, STRATEGIES.SUDO_PASSWORD, 'unavailable');
-  }
-
-  const suProbe = await capability(remoteExecImpl, target, 'command -v su >/dev/null 2>&1');
-  if (suProbe.exit_code === 0 && !suProbe.timed_out) {
-    const suPassword = await interactivePasswordProvider({
-      strategy: STRATEGIES.SU_PASSWORD,
-      target,
-      request,
-      upstreamClient,
-      resolveTargetImpl,
-      randomTokenImpl,
-      promptText: `Enter root password for ${target}:`,
-      promptPattern: 'Password:',
-      commandBuilder: (rootSource, _token, outer) => `LC_ALL=C su - root -c ${quotePosix(`/bin/bash -lc ${quotePosix(rootSource)}`)}; __ptext_outer=$?; printf '\\n${outer}%s\\n' "$__ptext_outer"`,
-    });
-    if (suPassword.available) {
-      attempt(attempts, STRATEGIES.SU_PASSWORD, 'selected');
-      return resultFromExecution(STRATEGIES.SU_PASSWORD, target, suPassword.executed, attempts);
-    }
-    attempt(attempts, STRATEGIES.SU_PASSWORD, 'unavailable');
   }
 
   throw new TerminalError(

@@ -1,6 +1,7 @@
 import { ERROR_CATEGORIES, TerminalError, normalizeFailure } from './errors.mjs';
 import { remoteExec } from './remote-exec.mjs';
 import { remoteRootExec } from './root-exec.mjs';
+import { systemdUnitAction } from './systemd-core.mjs';
 import {
   diskUsage,
   gpuInfo,
@@ -476,25 +477,22 @@ async function callMutationTool(
 
   const action = name.slice('service_'.length);
   const service = validateServiceUnit(args.service);
-  return executeMutation(
+  const generic = await systemdUnitAction(
+    { target, unit: service, action, privilege },
     {
-      toolName: name,
-      action,
-      target,
-      privilege,
-      pid: null,
-      signal: null,
-      service,
+      remoteExecImpl: deps?.remoteExecImpl ?? remoteExec,
+      rootExecImpl: deps?.rootExecImpl ?? remoteRootExec,
     },
-    {
-      userCommand: {
-        command: `systemctl ${action} "$PTEXT_SERVICE"`,
-        env: { PTEXT_SERVICE: service },
-      },
-      rootCommand: `systemctl ${action} ${service}`,
-    },
-    deps,
   );
+  return normalizedMutation({
+    action,
+    target,
+    privilege: generic.actual_privilege,
+    strategy: generic.strategy,
+    pid: null,
+    signal: null,
+    service,
+  }, generic);
 }
 
 export async function callSystemTool(name, args, deps = {}) {

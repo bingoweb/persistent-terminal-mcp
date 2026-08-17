@@ -3,6 +3,7 @@ import { normalizeFailure, TerminalError } from './errors.mjs';
 import { checkForwardHealth } from './forward-tools.mjs';
 import { remoteExec } from './remote-exec.mjs';
 import { createStateStore } from './state-store.mjs';
+import { TELEMETRY_COUNTERS, TELEMETRY_TIMINGS } from './telemetry.mjs';
 import { resolveTarget } from './target-resolver.mjs';
 import { PtyUpstreamClient } from './upstream-pty.mjs';
 import { VERSION } from './version.mjs';
@@ -11,6 +12,9 @@ const DEFAULT_GATEWAY_HEALTH_URL = 'http://127.0.0.1:9022/healthz';
 const defaultStateStore = createStateStore();
 const defaultUpstreamClient = new PtyUpstreamClient();
 const ACTIVE_TASK_STATES = new Set(['queued', 'running']);
+const TELEMETRY_BUCKET_NAMES = Object.freeze([
+  'le_10_ms', 'le_50_ms', 'le_100_ms', 'le_500_ms', 'le_1000_ms', 'gt_1000_ms',
+]);
 
 function failureSchema() {
   return {
@@ -46,6 +50,69 @@ const RECONNECT_SCHEMA = Object.freeze({
   required: ['attempts', 'successes', 'failures'],
   additionalProperties: false,
 });
+
+function objectSchema(properties, required = []) {
+  return { type: 'object', properties, required, additionalProperties: false };
+}
+
+const TELEMETRY_BUCKET_SCHEMA = objectSchema({
+  le_10_ms: { type: 'integer', minimum: 0 },
+  le_50_ms: { type: 'integer', minimum: 0 },
+  le_100_ms: { type: 'integer', minimum: 0 },
+  le_500_ms: { type: 'integer', minimum: 0 },
+  le_1000_ms: { type: 'integer', minimum: 0 },
+  gt_1000_ms: { type: 'integer', minimum: 0 },
+});
+
+const TELEMETRY_METRIC_SCHEMA = objectSchema({
+  count: { type: 'integer', minimum: 0 },
+  total_ms: { type: 'number', minimum: 0 },
+  min_ms: { type: ['number', 'null'], minimum: 0 },
+  max_ms: { type: ['number', 'null'], minimum: 0 },
+  average_ms: { type: 'number', minimum: 0 },
+  buckets: TELEMETRY_BUCKET_SCHEMA,
+});
+
+const RUNTIME_TELEMETRY_SCHEMA = objectSchema({
+  state: { type: 'string', enum: ['available', 'unavailable'] },
+  timings: objectSchema(Object.fromEntries(
+    TELEMETRY_TIMINGS.map((name) => [name, TELEMETRY_METRIC_SCHEMA]),
+  )),
+  counters: objectSchema(Object.fromEntries(
+    TELEMETRY_COUNTERS.map((name) => [name, { type: 'integer', minimum: 0 }]),
+  )),
+}, ['state', 'timings', 'counters']);
+
+const RUNTIME_MULTIPLEX_SCHEMA = objectSchema({
+  state: { type: 'string', enum: ['available', 'unavailable'] },
+  mode: { type: 'string', enum: ['off', 'auto', 'required', 'unmanaged'] },
+  active_masters: { type: ['integer', 'null'], minimum: 0 },
+}, ['state', 'mode', 'active_masters']);
+
+const RUNTIME_CAPABILITY_CACHE_SCHEMA = objectSchema({
+  state: { type: 'string', enum: ['available', 'unavailable'] },
+  entries: { type: ['integer', 'null'], minimum: 0 },
+  pending: { type: ['integer', 'null'], minimum: 0 },
+  ttl_ms: { type: ['integer', 'null'], minimum: 1, maximum: 3_600_000 },
+}, ['state', 'entries', 'pending', 'ttl_ms']);
+
+const RUNTIME_PRIVILEGE_CACHE_SCHEMA = objectSchema({
+  state: { type: 'string', enum: ['available', 'unavailable'] },
+  ttl_ms: { type: ['integer', 'null'], minimum: 1, maximum: 3_600_000 },
+  entries: { type: ['integer', 'null'], minimum: 0 },
+  providers: objectSchema({
+    direct_root: { type: 'integer', minimum: 0 },
+    sudo_nopasswd: { type: 'integer', minimum: 0 },
+    docker_host_root: { type: 'integer', minimum: 0 },
+  }, ['direct_root', 'sudo_nopasswd', 'docker_host_root']),
+}, ['state', 'ttl_ms', 'entries', 'providers']);
+
+const RUNTIME_SCHEMA = objectSchema({
+  telemetry: RUNTIME_TELEMETRY_SCHEMA,
+  multiplex: RUNTIME_MULTIPLEX_SCHEMA,
+  capability_cache: RUNTIME_CAPABILITY_CACHE_SCHEMA,
+  privilege_cache: RUNTIME_PRIVILEGE_CACHE_SCHEMA,
+}, ['telemetry', 'multiplex', 'capability_cache', 'privilege_cache']);
 
 const HEALTH_SUCCESS_SCHEMA = Object.freeze({
   type: 'object',
@@ -144,8 +211,9 @@ const HEALTH_SUCCESS_SCHEMA = Object.freeze({
       required: ['reconnect', 'failures'],
       additionalProperties: false,
     },
+    runtime: RUNTIME_SCHEMA,
   },
-  required: ['extension', 'upstream', 'gateway', 'counts', 'targets', 'diagnostics'],
+  required: ['extension', 'upstream', 'gateway', 'counts', 'targets', 'diagnostics', 'runtime'],
   additionalProperties: false,
 });
 
@@ -240,6 +308,103 @@ function aiTmuxResult(execution) {
   };
 }
 
+function safeSnapshot(source) {
+  try {
+    const value = source?.snapshot?.();
+    return value && typeof value === 'object' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function runtimeTelemetry(source) {
+  const snapshot = safeSnapshot(source);
+  if (!snapshot) return { state: 'unavailable', timings: {}, counters: {} };
+  const timings = {};
+  const sourceTimings = snapshot.timings && typeof snapshot.timings === 'object' ? snapshot.timings : {};
+  for (const name of TELEMETRY_TIMINGS) {
+    const metric = sourceTimings[name];
+    if (!metric || typeof metric !== 'object') continue;
+    const normalized = {};
+    if (Number.isInteger(metric.count) && metric.count >= 0) normalized.count = metric.count;
+    for (const field of ['total_ms', 'average_ms']) {
+      if (typeof metric[field] === 'number' && Number.isFinite(metric[field]) && metric[field] >= 0) normalized[field] = metric[field];
+    }
+    for (const field of ['min_ms', 'max_ms']) {
+      if (metric[field] === null) normalized[field] = null;
+      else if (typeof metric[field] === 'number' && Number.isFinite(metric[field]) && metric[field] >= 0) normalized[field] = metric[field];
+    }
+    if (metric.buckets && typeof metric.buckets === 'object') {
+      const buckets = {};
+      for (const bucket of TELEMETRY_BUCKET_NAMES) {
+        if (Number.isInteger(metric.buckets[bucket]) && metric.buckets[bucket] >= 0) buckets[bucket] = metric.buckets[bucket];
+      }
+      normalized.buckets = buckets;
+    }
+    timings[name] = normalized;
+  }
+  const counters = {};
+  const sourceCounters = snapshot.counters && typeof snapshot.counters === 'object' ? snapshot.counters : {};
+  for (const name of TELEMETRY_COUNTERS) {
+    if (Number.isInteger(sourceCounters[name]) && sourceCounters[name] >= 0) counters[name] = sourceCounters[name];
+  }
+  return { state: 'available', timings, counters };
+}
+
+function runtimeMultiplex(source) {
+  const snapshot = safeSnapshot(source);
+  if (!snapshot) return { state: 'unavailable', mode: 'unmanaged', active_masters: null };
+  const mode = ['off', 'auto', 'required'].includes(snapshot.mode) ? snapshot.mode : 'unmanaged';
+  return {
+    state: 'available',
+    mode,
+    active_masters: Number.isInteger(snapshot.active_masters) && snapshot.active_masters >= 0
+      ? snapshot.active_masters
+      : null,
+  };
+}
+
+function runtimeCapabilityCache(source) {
+  const snapshot = safeSnapshot(source);
+  if (!snapshot) return { state: 'unavailable', entries: null, pending: null, ttl_ms: null };
+  return {
+    state: 'available',
+    entries: Number.isInteger(snapshot.entries) && snapshot.entries >= 0 ? snapshot.entries : null,
+    pending: Number.isInteger(snapshot.pending) && snapshot.pending >= 0 ? snapshot.pending : null,
+    ttl_ms: Number.isInteger(snapshot.ttl_ms) && snapshot.ttl_ms > 0 ? snapshot.ttl_ms : null,
+  };
+}
+
+function runtimePrivilegeCache(source) {
+  const snapshot = safeSnapshot(source);
+  if (!snapshot) {
+    return {
+      state: 'unavailable', ttl_ms: null, entries: null,
+      providers: { direct_root: 0, sudo_nopasswd: 0, docker_host_root: 0 },
+    };
+  }
+  const providers = snapshot.providers && typeof snapshot.providers === 'object' ? snapshot.providers : {};
+  return {
+    state: 'available',
+    ttl_ms: Number.isInteger(snapshot.ttl_ms) && snapshot.ttl_ms > 0 ? snapshot.ttl_ms : null,
+    entries: Number.isInteger(snapshot.entries) && snapshot.entries >= 0 ? snapshot.entries : null,
+    providers: {
+      direct_root: Number.isInteger(providers.direct_root) && providers.direct_root >= 0 ? providers.direct_root : 0,
+      sudo_nopasswd: Number.isInteger(providers.sudo_nopasswd) && providers.sudo_nopasswd >= 0 ? providers.sudo_nopasswd : 0,
+      docker_host_root: Number.isInteger(providers.docker_host_root) && providers.docker_host_root >= 0 ? providers.docker_host_root : 0,
+    },
+  };
+}
+
+function runtimeView({ telemetry, multiplexManager, capabilityInventory, privilegeEngine }) {
+  return {
+    telemetry: runtimeTelemetry(telemetry),
+    multiplex: runtimeMultiplex(multiplexManager),
+    capability_cache: runtimeCapabilityCache(capabilityInventory),
+    privilege_cache: runtimePrivilegeCache(privilegeEngine),
+  };
+}
+
 async function inspectTarget(
   target,
   includeRemoteSessions,
@@ -298,6 +463,10 @@ export async function getTerminalHealth(
     remoteExecImpl = remoteExec,
     fetchImpl = fetch,
     gatewayHealthUrl = DEFAULT_GATEWAY_HEALTH_URL,
+    telemetry = null,
+    multiplexManager = null,
+    capabilityInventory = null,
+    privilegeEngine = null,
   } = {},
 ) {
   const { targets, includeRemoteSessions } = validateRequest(request);
@@ -374,6 +543,7 @@ export async function getTerminalHealth(
     },
     targets: targetResults,
     diagnostics: diagnostics.snapshot(),
+    runtime: runtimeView({ telemetry, multiplexManager, capabilityInventory, privilegeEngine }),
   };
 }
 

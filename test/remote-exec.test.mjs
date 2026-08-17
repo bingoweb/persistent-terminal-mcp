@@ -114,6 +114,75 @@ test('runner preserves ssh alias and safely carries cwd env and stdin', async ()
   assert.equal(result.stdout, 'ok');
 });
 
+test('runner injects managed multiplex argv before the target without changing the public command result', async () => {
+  const invocations = [];
+  const managerCalls = [];
+  const telemetryCalls = [];
+  const multiplexManager = {
+    async acquire(target) {
+      managerCalls.push(target);
+      return {
+        args: ['-o', 'ControlMaster=no', '-o', 'ControlPath=/private/ctl_deadbeef'],
+        state: 'hit',
+      };
+    },
+  };
+  const telemetry = {
+    recordTiming(metric, value) { telemetryCalls.push({ metric, value }); },
+  };
+
+  const raw = await runSshCommand(
+    'test-host',
+    { command: 'printf ok' },
+    {
+      multiplexManager,
+      telemetry,
+      spawnImpl: (command, args, options) => {
+        invocations.push({ command, args, options });
+        return fakeChild({ stdout: 'ok' });
+      },
+    },
+  );
+
+  assert.deepEqual(managerCalls, ['test-host']);
+  assert.deepEqual(invocations[0].args.slice(0, 9), [
+    '-o', 'ControlMaster=no',
+    '-o', 'ControlPath=/private/ctl_deadbeef',
+    '-T', '-o', 'BatchMode=yes',
+    'test-host', '--',
+  ]);
+  assert.equal(raw.multiplexState, 'hit');
+  assert.equal(telemetryCalls.some((call) => call.metric === 'remote_execution'), true);
+
+  const publicResult = await remoteExec(
+    { target: 'test-host', command: 'printf ok' },
+    { runner: async () => raw },
+  );
+  assert.equal('multiplex_state' in publicResult, false);
+  assert.equal('multiplexState' in publicResult, false);
+  assert.deepEqual(Object.keys(publicResult), [
+    'exit_code', 'stdout', 'stderr', 'duration_ms', 'timed_out', 'truncated',
+  ]);
+});
+
+test('runner does not spawn the remote command when required multiplex acquisition fails', async () => {
+  let spawnCalls = 0;
+  const expected = new Error('required master unavailable');
+
+  await assert.rejects(
+    runSshCommand(
+      'test-host',
+      { command: 'true' },
+      {
+        multiplexManager: { acquire: async () => { throw expected; } },
+        spawnImpl: () => { spawnCalls += 1; return fakeChild(); },
+      },
+    ),
+    (error) => error === expected,
+  );
+  assert.equal(spawnCalls, 0);
+});
+
 test('runner caps collected output while continuing to drain streams', async () => {
   const result = await runSshCommand(
     'test-host',

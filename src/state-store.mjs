@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto';
 
 import { TerminalError } from './errors.mjs';
 
+const coordinatorsByFs = new WeakMap();
+
 export const DEFAULT_STATE_PATH = path.join(
   os.homedir(),
   '.local',
@@ -80,27 +82,45 @@ async function atomicWrite(statePath, state, fsImpl) {
   }
 }
 
+function coordinatorFor(statePath, fsImpl) {
+  let byPath = coordinatorsByFs.get(fsImpl);
+  if (!byPath) {
+    byPath = new Map();
+    coordinatorsByFs.set(fsImpl, byPath);
+  }
+
+  const key = path.resolve(statePath);
+  let coordinator = byPath.get(key);
+  if (!coordinator) {
+    coordinator = {
+      updateQueue: Promise.resolve(),
+      cachedState: null,
+      initialReadPromise: null,
+    };
+    byPath.set(key, coordinator);
+  }
+  return coordinator;
+}
+
 export function createStateStore(statePath = DEFAULT_STATE_PATH, { fsImpl = fs } = {}) {
   if (typeof statePath !== 'string' || statePath.length === 0 || statePath.includes('\0')) {
     throw new TerminalError('validation_error', 'State path must be a non-empty path without NUL bytes');
   }
 
-  let updateQueue = Promise.resolve();
-  let cachedState = null;
-  let initialReadPromise = null;
+  const coordinator = coordinatorFor(statePath, fsImpl);
 
   async function load() {
-    if (cachedState !== null) return cachedState;
-    if (initialReadPromise) return initialReadPromise;
-    initialReadPromise = readState(statePath, fsImpl)
+    if (coordinator.cachedState !== null) return coordinator.cachedState;
+    if (coordinator.initialReadPromise) return coordinator.initialReadPromise;
+    coordinator.initialReadPromise = readState(statePath, fsImpl)
       .then((state) => {
-        cachedState = state;
+        coordinator.cachedState = state;
         return state;
       })
       .finally(() => {
-        initialReadPromise = null;
+        coordinator.initialReadPromise = null;
       });
-    return initialReadPromise;
+    return coordinator.initialReadPromise;
   }
 
   async function read() {
@@ -118,16 +138,16 @@ export function createStateStore(statePath = DEFAULT_STATE_PATH, { fsImpl = fs }
     const next = validateState(replacement === undefined ? draft : replacement);
 
     await atomicWrite(statePath, next, fsImpl);
-    cachedState = structuredClone(next);
+    coordinator.cachedState = structuredClone(next);
     return structuredClone(next);
   }
 
   function update(mutator) {
-    const queued = updateQueue.then(
+    const queued = coordinator.updateQueue.then(
       () => performUpdate(mutator),
       () => performUpdate(mutator),
     );
-    updateQueue = queued.catch(() => {});
+    coordinator.updateQueue = queued.catch(() => {});
     return queued;
   }
 

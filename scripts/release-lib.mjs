@@ -88,6 +88,37 @@ export function verifySourceEntries(entries, { prefix }) {
   }
 }
 
+export function verifySourceReleaseMetadata({
+  version,
+  prefix,
+  entries,
+  packageJson,
+  changelog,
+}) {
+  if (typeof version !== 'string' || !STABLE_ZERO_VERSION.test(version)) {
+    throw new TypeError('source release version must be a stable major-zero version');
+  }
+  if (typeof prefix !== 'string' || prefix.length === 0 || !prefix.endsWith('/')) {
+    throw new TypeError('source release prefix must be a non-empty directory prefix');
+  }
+  if (!Array.isArray(entries)) throw new TypeError('source release entries must be an array');
+  if (!packageJson || typeof packageJson !== 'object' || Array.isArray(packageJson)) {
+    throw new TypeError('source archive package metadata must be an object');
+  }
+  if (packageJson.version !== version) {
+    throw new Error(
+      `source archive package version ${String(packageJson.version)} does not match requested artifact version ${version}`,
+    );
+  }
+  const releaseNotes = `${prefix}docs/releases/v${version}.md`;
+  if (!entries.map(String).includes(releaseNotes)) {
+    throw new Error(`source archive is missing release notes for v${version}: ${releaseNotes}`);
+  }
+  if (typeof changelog !== 'string' || !changelog.includes(`## [${version}] - 2026-08-17`)) {
+    throw new Error(`source archive changelog does not contain release ${version}`);
+  }
+}
+
 export function renderSha256Sums(records) {
   if (!Array.isArray(records) || records.length === 0) {
     throw new TypeError('checksum records must be a non-empty array');

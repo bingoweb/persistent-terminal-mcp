@@ -135,6 +135,115 @@ test('Docker host-root is tried after passwordless sudo is unavailable and only 
   ]);
 });
 
+test('provider order and capability hints may skip known-unavailable providers but Docker still performs a live UID 0 proof', async () => {
+  const calls = [];
+  const result = await remoteRootExec(
+    { target: 'taylan', command: 'printf ROOT_OK' },
+    {
+      env: { PTEXT_ROOT_TARGETS: 'taylan' },
+      providerOrder: [
+        'docker_host_root',
+        'direct_root',
+        'sudo_nopasswd',
+        'sudo_password',
+        'su_root_password',
+      ],
+      capabilityHint: {
+        direct_root: false,
+        sudo_nopasswd: false,
+        docker_host_root: true,
+        sudo_password: false,
+        su_root_password: false,
+      },
+      remoteExecImpl: async (request) => {
+        calls.push(structuredClone(request));
+        if (request.command === 'command -v docker >/dev/null 2>&1') return commandResult();
+        if (request.command.includes("docker run") && request.command.includes("'id -u'")) {
+          return commandResult({ stdout: '0\n' });
+        }
+        if (request.command.includes('docker run') && request.command.includes('ROOT_OK')) {
+          return commandResult({ stdout: 'ROOT_OK' });
+        }
+        throw new Error(`unexpected probe ${JSON.stringify(request)}`);
+      },
+    },
+  );
+
+  assert.equal(result.strategy, 'docker_host_root');
+  assert.equal(result.stdout, 'ROOT_OK');
+  assert.equal(calls.some((call) => call.command === 'id -u'), false, 'known-unavailable direct root should be skipped');
+  assert.equal(calls.some((call) => call.command.includes('sudo')), false, 'known-unavailable sudo should be skipped');
+  assert.equal(calls.filter((call) => call.command.includes('docker run')).length, 2, 'Docker proof plus requested command are both required');
+  assert.deepEqual(result.attempts, [{ strategy: 'docker_host_root', status: 'selected' }]);
+});
+
+test('preferred cached provider proof failure falls through to another proven provider instead of executing through stale privilege', async () => {
+  const calls = [];
+  const result = await remoteRootExec(
+    { target: 'taylan', command: 'id -u' },
+    {
+      env: { PTEXT_ROOT_TARGETS: 'taylan' },
+      providerOrder: [
+        'sudo_nopasswd',
+        'docker_host_root',
+        'direct_root',
+        'sudo_password',
+        'su_root_password',
+      ],
+      capabilityHint: {
+        direct_root: false,
+        sudo_nopasswd: true,
+        docker_host_root: true,
+        sudo_password: false,
+        su_root_password: false,
+      },
+      remoteExecImpl: async (request) => {
+        calls.push(structuredClone(request));
+        if (request.command === 'command -v sudo >/dev/null 2>&1') return commandResult();
+        if (request.command === 'sudo -n -- /bin/bash -lc true') {
+          return commandResult({ exit_code: 1, stderr: 'sudo: a password is required\n' });
+        }
+        if (request.command === 'command -v docker >/dev/null 2>&1') return commandResult();
+        if (request.command.includes('docker run') && request.command.includes("'id -u'")) {
+          return commandResult({ stdout: '0\n' });
+        }
+        if (request.command.includes('docker run')) return commandResult({ stdout: '0\n' });
+        throw new Error(`unexpected ${JSON.stringify(request)}`);
+      },
+    },
+  );
+
+  assert.equal(result.strategy, 'docker_host_root');
+  assert.equal(calls.some((call) => /^sudo -n -- \/bin\/bash -lc 'id -u'/u.test(call.command)), false, 'failed sudo proof must prevent requested command through sudo');
+  assert.deepEqual(result.attempts, [
+    { strategy: 'sudo_nopasswd', status: 'unavailable' },
+    { strategy: 'docker_host_root', status: 'selected' },
+  ]);
+});
+
+test('provider order rejects duplicates, unknown providers and capability hints outside the closed provider vocabulary', async () => {
+  for (const dependencies of [
+    { providerOrder: ['direct_root', 'direct_root'] },
+    { providerOrder: ['direct_root', 'magic_root'] },
+    { capabilityHint: { direct_root: true, magic_root: false } },
+    { capabilityHint: { direct_root: 'yes' } },
+  ]) {
+    let calls = 0;
+    await assert.rejects(
+      remoteRootExec(
+        { target: 'taylan', command: 'true' },
+        {
+          env: { PTEXT_ROOT_TARGETS: 'taylan' },
+          remoteExecImpl: async () => { calls += 1; return commandResult({ stdout: '0\n' }); },
+          ...dependencies,
+        },
+      ),
+      (error) => error?.category === 'validation_error',
+    );
+    assert.equal(calls, 0);
+  }
+});
+
 test('when automatic providers fail, interactive sudo opens the secret-safe GUI only after PTY reports a password prompt', async () => {
   const execCalls = [];
   const upstreamCalls = [];

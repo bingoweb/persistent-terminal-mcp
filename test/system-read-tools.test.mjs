@@ -153,9 +153,9 @@ test('service_status parses systemctl show and carries the exact unit through en
     { remoteExecImpl: async (request) => { calls.push(request); return remoteResult(fixture); } },
   );
   assert.equal(calls[0].env.LC_ALL, 'C');
-  assert.equal(calls[0].env.PTEXT_SERVICE, 'ssh.service');
+  assert.equal(calls[0].env.PTEXT_UNIT, 'ssh.service');
   assert.equal(calls[0].command.includes('ssh.service'), false);
-  assert.match(calls[0].command, /\$PTEXT_SERVICE/);
+  assert.match(calls[0].command, /\$PTEXT_UNIT/);
   assert.equal(result.active_state, 'active');
 });
 

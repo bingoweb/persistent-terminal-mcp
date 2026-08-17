@@ -108,7 +108,13 @@ test('callRemoteFsTool maps canonical tools to helper operations without shell a
 test('unified MCP catalog publishes all seven remote filesystem tools', () => {
   const catalog = buildToolCatalog({ upstreamTools: [] });
   for (const item of REMOTE_FS_TOOLS) {
-    assert.deepEqual(catalog.find((candidate) => candidate.name === item.name), item);
+    const published = catalog.find((candidate) => candidate.name === item.name);
+    const { annotations, ...base } = published;
+    assert.deepEqual(base, item);
+    assert.equal(typeof annotations.readOnlyHint, 'boolean');
+    assert.equal(typeof annotations.destructiveHint, 'boolean');
+    assert.equal(typeof annotations.idempotentHint, 'boolean');
+    assert.equal(typeof annotations.openWorldHint, 'boolean');
   }
 });
 

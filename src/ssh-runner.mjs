@@ -81,6 +81,8 @@ export async function runSshCommand(
     now = Date.now,
     setTimeoutImpl = setTimeout,
     clearTimeoutImpl = clearTimeout,
+    multiplexManager = null,
+    telemetry = null,
   } = {},
 ) {
   if (typeof targetAlias !== 'string' || targetAlias.trim() === '') {
@@ -106,13 +108,16 @@ export async function runSshCommand(
   const remoteScript = buildRemoteScript(request);
   const remoteCommand = `/bin/sh -lc ${quotePosix(remoteScript)}`;
   const target = targetAlias.trim();
+  const multiplex = multiplexManager === null
+    ? { args: [], state: null }
+    : await multiplexManager.acquire(target);
   const startedAt = now();
 
   let child;
   try {
     child = spawnImpl(
       'ssh',
-      ['-T', '-o', 'BatchMode=yes', target, '--', remoteCommand],
+      [...multiplex.args, '-T', '-o', 'BatchMode=yes', target, '--', remoteCommand],
       { stdio: ['pipe', 'pipe', 'pipe'] },
     );
   } catch (error) {
@@ -158,7 +163,7 @@ export async function runSshCommand(
     clearTimeoutImpl(timer);
   }
 
-  return {
+  const result = {
     code: closeResult.code,
     signal: closeResult.signal,
     stdout: Buffer.concat(stdoutChunks).toString('utf8'),
@@ -166,5 +171,8 @@ export async function runSshCommand(
     durationMs: Math.max(0, now() - startedAt),
     timedOut,
     truncated: shared.truncated,
+    multiplexState: multiplex.state,
   };
+  telemetry?.recordTiming?.('remote_execution', result.durationMs);
+  return result;
 }

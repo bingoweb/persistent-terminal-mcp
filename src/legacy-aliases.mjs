@@ -1,3 +1,5 @@
+import { annotationForLocalTool } from './tool-annotations.mjs';
+
 export const LEGACY_ALIAS_SPECS = Object.freeze([
   Object.freeze({ name: 'ssh_exec', target: 'remote_exec' }),
   Object.freeze({ name: 'ssh_ensure_session', target: 'ensure_session' }),
@@ -24,6 +26,7 @@ export function buildLegacyAliasTools(canonicalTools = []) {
       ...canonical,
       name: spec.name,
       description: `DEPRECATED: use ${spec.target}. ${canonical.description ?? ''}`.trim(),
+      annotations: annotationForLocalTool(spec.name),
     });
   }
   return aliases;

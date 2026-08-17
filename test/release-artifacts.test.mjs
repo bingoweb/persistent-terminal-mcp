@@ -8,6 +8,7 @@ import {
   renderSha256Sums,
   verifyPackEntries,
   verifySourceEntries,
+  verifySourceReleaseMetadata,
 } from '../scripts/release-lib.mjs';
 
 test('runtime package whitelist excludes development-only trees', async () => {
@@ -94,6 +95,43 @@ test('verifySourceEntries requires standalone repository root layout', () => {
     () => verifySourceEntries([...valid, `${prefix}persistent-terminal-extended/package.json`], { prefix }),
     /embedded parent path/u,
   );
+});
+
+test('verifySourceReleaseMetadata refuses an archive whose committed release identity lags the requested artifact version', () => {
+  const prefix = 'persistent-terminal-mcp-0.11.0/';
+  const entries = [
+    `${prefix}package.json`,
+    `${prefix}CHANGELOG.md`,
+    `${prefix}docs/releases/v0.11.0.md`,
+  ];
+  assert.doesNotThrow(() => verifySourceReleaseMetadata({
+    version: '0.11.0',
+    prefix,
+    entries,
+    packageJson: { name: 'persistent-terminal-mcp', version: '0.11.0' },
+    changelog: '## [0.11.0] - 2026-08-17\n',
+  }));
+  assert.throws(() => verifySourceReleaseMetadata({
+    version: '0.11.0',
+    prefix,
+    entries,
+    packageJson: { name: 'persistent-terminal-mcp', version: '0.10.0' },
+    changelog: '## [0.10.0] - 2026-08-17\n',
+  }), /source archive package version.*0\.10\.0.*requested.*0\.11\.0/iu);
+  assert.throws(() => verifySourceReleaseMetadata({
+    version: '0.11.0',
+    prefix,
+    entries: entries.filter((entry) => !entry.endsWith('docs/releases/v0.11.0.md')),
+    packageJson: { name: 'persistent-terminal-mcp', version: '0.11.0' },
+    changelog: '## [0.11.0] - 2026-08-17\n',
+  }), /source archive is missing release notes.*v0\.11\.0/iu);
+  assert.throws(() => verifySourceReleaseMetadata({
+    version: '0.11.0',
+    prefix,
+    entries,
+    packageJson: { name: 'persistent-terminal-mcp', version: '0.11.0' },
+    changelog: '## [0.10.0] - 2026-08-17\n',
+  }), /source archive changelog.*0\.11\.0/iu);
 });
 
 test('renderSha256Sums sorts names and emits the standard two-space separator', () => {

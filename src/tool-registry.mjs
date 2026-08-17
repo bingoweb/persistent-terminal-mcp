@@ -1,4 +1,5 @@
 import { TerminalError, normalizeFailure } from './errors.mjs';
+import { ADMIN_TOOLS, ADMIN_TOOL_NAMES, callAdminTool } from './admin-tools.mjs';
 import { FORWARD_TOOLS, FORWARD_TOOL_NAMES, callForwardTool } from './forward-tools.mjs';
 import { TERMINAL_HEALTH_TOOL, callTerminalHealthTool } from './health-tool.mjs';
 import { buildLegacyAliasTools, resolveLegacyAliasCall } from './legacy-aliases.mjs';
@@ -7,7 +8,10 @@ import { REMOTE_FS_TOOLS, REMOTE_FS_TOOL_NAMES, callRemoteFsTool } from './remot
 import { remoteRootExec } from './root-exec.mjs';
 import { SESSION_TOOLS, SESSION_TOOL_NAMES, callSessionTool } from './session-tools.mjs';
 import { SYSTEM_TOOLS, SYSTEM_TOOL_NAMES, callSystemTool } from './system-tools.mjs';
+import { SYSTEMD_TOOLS, SYSTEMD_TOOL_NAMES, callSystemdTool } from './systemd-tools.mjs';
 import { TASK_TOOLS, TASK_TOOL_NAMES, callTaskTool } from './task-tools.mjs';
+import { TARGET_TOOLS, TARGET_TOOL_NAMES, callTargetTool } from './target-tools.mjs';
+import { annotateLocalTools } from './tool-annotations.mjs';
 import { TRANSFER_TOOLS, TRANSFER_TOOL_NAMES, callTransferTool } from './transfer-tools.mjs';
 
 export const REMOTE_EXEC_TOOL = Object.freeze({
@@ -160,7 +164,8 @@ export const ROOT_EXEC_TOOL = Object.freeze({
   },
 });
 
-export const LOCAL_TOOLS = Object.freeze([
+const LOCAL_TOOL_DEFINITIONS = Object.freeze([
+  ...ADMIN_TOOLS,
   REMOTE_EXEC_TOOL,
   ROOT_EXEC_TOOL,
   ...SESSION_TOOLS,
@@ -169,8 +174,12 @@ export const LOCAL_TOOLS = Object.freeze([
   ...FORWARD_TOOLS,
   ...TASK_TOOLS,
   ...SYSTEM_TOOLS,
+  ...SYSTEMD_TOOLS,
+  ...TARGET_TOOLS,
   TERMINAL_HEALTH_TOOL,
 ]);
+
+export const LOCAL_TOOLS = annotateLocalTools(LOCAL_TOOL_DEFINITIONS);
 
 export function buildToolCatalog({ upstreamTools = [], localTools = LOCAL_TOOLS } = {}) {
   const names = new Set();
@@ -214,12 +223,15 @@ export async function callTool(
     upstreamToolNames,
     remoteExecImpl = remoteExec,
     rootExecImpl = remoteRootExec,
+    adminToolCallImpl = callAdminTool,
     sessionToolCallImpl = callSessionTool,
     remoteFsToolCallImpl = callRemoteFsTool,
     transferToolCallImpl = callTransferTool,
     forwardToolCallImpl = callForwardTool,
     taskToolCallImpl = callTaskTool,
     systemToolCallImpl = callSystemTool,
+    systemdToolCallImpl = callSystemdTool,
+    targetToolCallImpl = callTargetTool,
     healthToolCallImpl = callTerminalHealthTool,
   },
 ) {
@@ -238,6 +250,10 @@ export async function callTool(
         isError: true,
       };
     }
+  }
+
+  if (ADMIN_TOOL_NAMES.has(name)) {
+    return adminToolCallImpl(name, args ?? {});
   }
 
   if (name === ROOT_EXEC_TOOL.name) {
@@ -281,6 +297,14 @@ export async function callTool(
     return systemToolCallImpl(name, args ?? {}, { upstreamClient });
   }
 
+  if (SYSTEMD_TOOL_NAMES.has(name)) {
+    return systemdToolCallImpl(name, args ?? {}, { remoteExecImpl, rootExecImpl });
+  }
+
+  if (TARGET_TOOL_NAMES.has(name)) {
+    return targetToolCallImpl(name, args ?? {});
+  }
+
   if (name === TERMINAL_HEALTH_TOOL.name) {
     return healthToolCallImpl(args ?? {}, { upstreamClient });
   }
@@ -292,12 +316,15 @@ export async function callTool(
       upstreamToolNames,
       remoteExecImpl,
       rootExecImpl,
+      adminToolCallImpl,
       sessionToolCallImpl,
       remoteFsToolCallImpl,
       transferToolCallImpl,
       forwardToolCallImpl,
       taskToolCallImpl,
       systemToolCallImpl,
+      systemdToolCallImpl,
+      targetToolCallImpl,
       healthToolCallImpl,
     });
   }

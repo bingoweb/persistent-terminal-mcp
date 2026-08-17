@@ -66,3 +66,48 @@ test('update accepts an immutable replacement returned by the mutator', async (t
   assert.equal(result.sessions.named.remote_session_id, 'r3');
   assert.deepEqual(await store.read(), result);
 });
+
+test('independent store instances for one state path cannot overwrite each other from stale caches', async (t) => {
+  const statePath = await tempStatePath(t);
+  const sessionStore = createStateStore(statePath);
+  const taskStore = createStateStore(statePath);
+
+  // Reproduce the production topology: different modules construct their own
+  // store instance and may both have loaded the same older state already.
+  await Promise.all([sessionStore.read(), taskStore.read()]);
+
+  await sessionStore.update((state) => {
+    state.sessions.acceptance = {
+      name: 'acceptance',
+      remote_session_id: 'remote-stable',
+    };
+  });
+  await taskStore.putTask({
+    task_id: 'task-after-session',
+    state: 'running',
+  });
+
+  const persisted = JSON.parse(await fs.readFile(statePath, 'utf8'));
+  assert.equal(persisted.sessions.acceptance.remote_session_id, 'remote-stable');
+  assert.equal(persisted.tasks['task-after-session'].state, 'running');
+  assert.deepEqual(await sessionStore.read(), persisted);
+  assert.deepEqual(await taskStore.read(), persisted);
+});
+
+test('concurrent updates from independent stores sharing one path are serialized without losing sections', async (t) => {
+  const statePath = await tempStatePath(t);
+  const sessionStore = createStateStore(statePath);
+  const taskStore = createStateStore(statePath);
+
+  await Promise.all([
+    sessionStore.update(async (state) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      state.sessions.concurrent = { remote_session_id: 'remote-concurrent' };
+    }),
+    taskStore.putTask({ task_id: 'task-concurrent', state: 'queued' }),
+  ]);
+
+  const persisted = JSON.parse(await fs.readFile(statePath, 'utf8'));
+  assert.equal(persisted.sessions.concurrent.remote_session_id, 'remote-concurrent');
+  assert.equal(persisted.tasks['task-concurrent'].state, 'queued');
+});
