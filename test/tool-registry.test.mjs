@@ -6,6 +6,7 @@ import {
   buildToolCatalog,
   callTool,
 } from '../src/tool-registry.mjs';
+import { SESSION_TOOLS } from '../src/session-tools.mjs';
 
 const SECRET_TOOL_NAMES = [
   'prepare_secret',
@@ -14,7 +15,7 @@ const SECRET_TOOL_NAMES = [
   'inject_secret',
 ];
 
-test('catalog contains upstream tools plus remote_exec without rewriting upstream schemas', async () => {
+test('catalog contains upstream tools plus all canonical local tools without rewriting upstream schemas', async () => {
   const upstreamTools = [
     { name: 'create_ssh_session', description: 'upstream', inputSchema: { type: 'object' } },
     ...SECRET_TOOL_NAMES.map((name) => ({
@@ -28,6 +29,9 @@ test('catalog contains upstream tools plus remote_exec without rewriting upstrea
 
   assert(catalog.some((tool) => tool.name === 'create_ssh_session'));
   assert(catalog.some((tool) => tool.name === 'remote_exec'));
+  for (const tool of SESSION_TOOLS) {
+    assert.deepEqual(catalog.find((item) => item.name === tool.name), tool);
+  }
   for (const name of SECRET_TOOL_NAMES) {
     const original = upstreamTools.find((tool) => tool.name === name);
     const published = catalog.find((tool) => tool.name === name);
@@ -40,6 +44,13 @@ test('catalog rejects an upstream/local tool name collision', () => {
   assert.throws(
     () => buildToolCatalog({ upstreamTools: [{ name: 'remote_exec', inputSchema: { type: 'object' } }] }),
     /collision.*remote_exec/i,
+  );
+});
+
+test('catalog rejects an upstream collision with a canonical session tool', () => {
+  assert.throws(
+    () => buildToolCatalog({ upstreamTools: [{ name: 'ensure_session', inputSchema: { type: 'object' } }] }),
+    /collision.*ensure_session/i,
   );
 });
 
@@ -74,6 +85,29 @@ test('callTool routes remote_exec locally and upstream tools unchanged', async (
 
   assert.strictEqual(returned, upstreamResult);
   assert.deepEqual(calls, [{ name: 'send_secret', args: { session_id: 'abc' } }]);
+});
+
+test('callTool routes canonical session tools to the local session layer', async () => {
+  const expected = {
+    content: [{ type: 'text', text: '{"session_id":"local-main"}' }],
+    structuredContent: { session_id: 'local-main' },
+  };
+  const calls = [];
+
+  const result = await callTool('ensure_session', { name: 'main', target: 'test-host' }, {
+    upstreamClient: { callTool: async () => { throw new Error('must not forward session tool upstream'); } },
+    upstreamToolNames: new Set(['create_ssh_session']),
+    remoteExecImpl: async () => { throw new Error('must not call remote_exec'); },
+    sessionToolCallImpl: async (name, args, deps) => {
+      calls.push({ name, args, upstreamClient: deps.upstreamClient });
+      return expected;
+    },
+  });
+
+  assert.strictEqual(result, expected);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].name, 'ensure_session');
+  assert.deepEqual(calls[0].args, { name: 'main', target: 'test-host' });
 });
 
 test('callTool rejects unknown names instead of forwarding blindly', async () => {

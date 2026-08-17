@@ -1,5 +1,7 @@
 import { TerminalError, normalizeFailure } from './errors.mjs';
+import { buildLegacyAliasTools, resolveLegacyAliasCall } from './legacy-aliases.mjs';
 import { remoteExec } from './remote-exec.mjs';
+import { SESSION_TOOLS, SESSION_TOOL_NAMES, callSessionTool } from './session-tools.mjs';
 
 export const REMOTE_EXEC_TOOL = Object.freeze({
   name: 'remote_exec',
@@ -65,7 +67,9 @@ export const REMOTE_EXEC_TOOL = Object.freeze({
   },
 });
 
-export function buildToolCatalog({ upstreamTools = [], localTools = [REMOTE_EXEC_TOOL] } = {}) {
+export const LOCAL_TOOLS = Object.freeze([REMOTE_EXEC_TOOL, ...SESSION_TOOLS]);
+
+export function buildToolCatalog({ upstreamTools = [], localTools = LOCAL_TOOLS } = {}) {
   const names = new Set();
   const catalog = [];
 
@@ -88,6 +92,14 @@ export function buildToolCatalog({ upstreamTools = [], localTools = [REMOTE_EXEC
     catalog.push(tool);
   }
 
+  for (const tool of buildLegacyAliasTools(catalog)) {
+    if (names.has(tool.name)) {
+      throw new TerminalError('validation_error', `Tool collision: ${tool.name}`);
+    }
+    names.add(tool.name);
+    catalog.push(tool);
+  }
+
   return catalog;
 }
 
@@ -98,6 +110,7 @@ export async function callTool(
     upstreamClient,
     upstreamToolNames,
     remoteExecImpl = remoteExec,
+    sessionToolCallImpl = callSessionTool,
   },
 ) {
   if (name === REMOTE_EXEC_TOOL.name) {
@@ -115,6 +128,20 @@ export async function callTool(
         isError: true,
       };
     }
+  }
+
+  if (SESSION_TOOL_NAMES.has(name)) {
+    return sessionToolCallImpl(name, args ?? {}, { upstreamClient });
+  }
+
+  const legacy = resolveLegacyAliasCall(name, args ?? {});
+  if (legacy) {
+    return callTool(legacy.target, legacy.args, {
+      upstreamClient,
+      upstreamToolNames,
+      remoteExecImpl,
+      sessionToolCallImpl,
+    });
   }
 
   if (!upstreamToolNames?.has(name)) {
