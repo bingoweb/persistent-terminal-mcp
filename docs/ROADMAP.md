@@ -108,7 +108,7 @@ Implemented privileged tool:
 remote_root_exec
 ```
 
-`remote_root_exec` is allowlisted and performs auditable best-effort root acquisition in this order: already-root SSH, passwordless sudo, Docker host-root, secret-safe interactive sudo, then secret-safe `su - root`. Password dialogs are opened only after the upstream PTY confirms that a password prompt is active, so secret bytes do not travel through ordinary tool arguments or AI-visible logs/state.
+`remote_root_exec` is controlled by `PTEXT_ROOT_TARGETS` and performs auditable best-effort root acquisition in this order: already-root SSH, passwordless sudo, Docker host-root, secret-safe interactive sudo, then secret-safe `su - root`. The policy accepts exact aliases or `*` for installations where every configured OpenSSH target is intentionally administrable. Password dialogs are opened only after the upstream PTY confirms that a password prompt is active, so secret bytes do not travel through ordinary tool arguments or AI-visible logs/state.
 
 Implemented read-only helpers:
 
@@ -131,7 +131,9 @@ service_stop
 service_restart
 ```
 
-Mutation tools default to `privilege:'user'` and never silently retry as root. The caller must explicitly request `privilege:'root'`, which routes through the same best-effort root provider and reports the selected strategy.
+Mutation tools default to `privilege:'auto'`: the configured user is tried first, and only an observed privilege denial enters the same best-effort root provider. `privilege:'user'` is a strict no-escalation override; `privilege:'root'` starts through the root provider immediately. Results always expose the privilege actually used and the selected root strategy when applicable.
+
+Performance hardening removes an unnecessary `ssh -G` subprocess from ordinary non-interactive execution, keeps the structured remote-filesystem helper in a content-addressed per-target cache instead of retransmitting its source for every operation, and caches the process-local lifecycle state after its initial atomic read.
 
 Live acceptance on the `taylan` test target proved ordinary `remote_exec` remained UID 1000, explicit root execution selected `docker_host_root` and returned UID 0, and normalized system, disk, GPU and `ssh.service` inspection succeeded without mutating production services.
 
@@ -149,4 +151,4 @@ Live acceptance on the `taylan` test target proved ordinary `remote_exec` remain
 
 ## Stable-release gate
 
-The implementation side of the stable-release gate is satisfied: major tools have deterministic tests, the live 15-phase acceptance matrix passes, and no known Critical/Important defect is recorded. The first stable pre-1.0 version is `0.9.0`. Release engineering adds a restricted runtime package, standalone source archive, CycloneDX SBOM, SHA-256 checksums, clean-install smoke, version consistency checks, retained rollback runtime, and a tag-only GitHub Release workflow. The release is not considered published until the exact `v0.9.0` tree passes deployment, live acceptance, burn-in, and public artifact verification.
+The implementation side of the stable-release gate is satisfied: major tools have deterministic tests, the live 15-phase acceptance matrix passes, and no known Critical/Important defect is recorded. The first stable pre-1.0 version was `0.9.0`; the current audited release line is `0.10.0`. Release engineering adds a restricted runtime package, standalone source archive, CycloneDX SBOM, SHA-256 checksums, clean-install smoke, version consistency checks, retained rollback runtime, and a tag-only GitHub Release workflow. A release is not considered published until its exact versioned tree passes deployment, live acceptance, burn-in, and public artifact verification.

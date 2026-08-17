@@ -76,14 +76,14 @@ export const REMOTE_EXEC_TOOL = Object.freeze({
 
 export const ROOT_EXEC_TOOL = Object.freeze({
   name: 'remote_root_exec',
-  description: 'Execute an explicitly privileged command as UID 0 on an allowlisted remote target using best-effort root acquisition. The provider may use an already-root SSH user, passwordless sudo, Docker host-root, or a secret-safe interactive password gate. This is never an implicit fallback from remote_exec.',
+  description: 'Execute an explicitly privileged command as UID 0 on a root-policy-enabled remote target using best-effort root acquisition. PTEXT_ROOT_TARGETS accepts explicit aliases or * for all configured OpenSSH targets. The provider may use an already-root SSH user, passwordless sudo, Docker host-root, or a secret-safe interactive password gate. This is never an implicit fallback from remote_exec.',
   inputSchema: {
     type: 'object',
     properties: {
       target: {
         type: 'string',
         minLength: 1,
-        description: 'Explicitly allowlisted native OpenSSH host or alias.',
+        description: 'Native OpenSSH host or alias permitted by PTEXT_ROOT_TARGETS; * enables all explicitly requested configured targets.',
       },
       command: {
         type: 'string',

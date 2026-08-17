@@ -1,7 +1,6 @@
 import { spawn } from 'node:child_process';
 
 import { TerminalError } from './errors.mjs';
-import { resolveTarget } from './target-resolver.mjs';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -79,7 +78,6 @@ export async function runSshCommand(
   request,
   {
     spawnImpl = spawn,
-    resolveTargetImpl = resolveTarget,
     now = Date.now,
     setTimeoutImpl = setTimeout,
     clearTimeoutImpl = clearTimeout,
@@ -87,6 +85,9 @@ export async function runSshCommand(
 ) {
   if (typeof targetAlias !== 'string' || targetAlias.trim() === '') {
     throw new TerminalError('validation_error', 'target must be a non-empty string');
+  }
+  if (targetAlias.includes('\0')) {
+    throw new TerminalError('validation_error', 'target must not contain NUL bytes');
   }
 
   const timeoutMs = validatePositiveInteger(request.timeout_ms, 'timeout_ms', DEFAULT_TIMEOUT_MS);
@@ -104,14 +105,14 @@ export async function runSshCommand(
   }
   const remoteScript = buildRemoteScript(request);
   const remoteCommand = `/bin/sh -lc ${quotePosix(remoteScript)}`;
-  const target = await resolveTargetImpl(targetAlias);
+  const target = targetAlias.trim();
   const startedAt = now();
 
   let child;
   try {
     child = spawnImpl(
       'ssh',
-      ['-T', '-o', 'BatchMode=yes', target.alias, '--', remoteCommand],
+      ['-T', '-o', 'BatchMode=yes', target, '--', remoteCommand],
       { stdio: ['pipe', 'pipe', 'pipe'] },
     );
   } catch (error) {

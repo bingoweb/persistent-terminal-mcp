@@ -22,3 +22,8 @@ export function readRootTargets(env = process.env) {
   }
   return readDockerRootTargets(env);
 }
+
+export function isRootTargetAllowed(target, env = process.env) {
+  const allowed = readRootTargets(env);
+  return allowed.has('*') || allowed.has(target);
+}

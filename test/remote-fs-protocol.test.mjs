@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { TerminalError } from '../src/errors.mjs';
-import { callRemoteFs } from '../src/remote-fs-client.mjs';
+import { callRemoteFs, createRemoteFsCache } from '../src/remote-fs-client.mjs';
 
 function commandResult(overrides = {}) {
   return {
@@ -42,15 +42,19 @@ test('missing remote python3 is a capability error and helper execution is skipp
   const calls = [];
   const execImpl = async (request) => {
     calls.push(request);
-    return commandResult({ exit_code: 1 });
+    return commandResult({ exit_code: 127, stderr: 'python3 missing\n' });
   };
 
   await assert.rejects(
-    () => callRemoteFs('test-host', { op: 'protocol_ping' }, { execImpl, helperSource: 'pass' }),
+    () => callRemoteFs('test-host', { op: 'protocol_ping' }, {
+      execImpl,
+      helperSource: 'pass',
+      cache: createRemoteFsCache(),
+    }),
     errorCategory('missing_remote_capability'),
   );
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].command, 'command -v python3 >/dev/null 2>&1');
+  assert.match(calls[0].command, /command -v python3/u);
 });
 
 test('malformed helper JSON is normalized as a helper protocol dependency failure', async () => {
@@ -62,7 +66,11 @@ test('malformed helper JSON is normalized as a helper protocol dependency failur
   };
 
   await assert.rejects(
-    () => callRemoteFs('test-host', { op: 'protocol_ping' }, { execImpl, helperSource: 'pass' }),
+    () => callRemoteFs('test-host', { op: 'protocol_ping' }, {
+      execImpl,
+      helperSource: 'pass',
+      cache: createRemoteFsCache(),
+    }),
     (error) => (
       error instanceof TerminalError
       && error.category === 'local_capability_dependency_error'
@@ -89,7 +97,11 @@ test('helper operation errors preserve the closed error category, message, and d
   };
 
   await assert.rejects(
-    () => callRemoteFs('test-host', { op: 'stat', path: '/root/private' }, { execImpl, helperSource: 'pass' }),
+    () => callRemoteFs('test-host', { op: 'stat', path: '/root/private' }, {
+      execImpl,
+      helperSource: 'pass',
+      cache: createRemoteFsCache(),
+    }),
     (error) => (
       error instanceof TerminalError
       && error.category === 'permission_privilege_error'
@@ -112,14 +124,41 @@ test('request data stays in JSON stdin and is never interpolated into the remote
   const result = await callRemoteFs(
     'test-host',
     { op: 'protocol_ping', path },
-    { execImpl, helperSource },
+    { execImpl, helperSource, cache: createRemoteFsCache() },
   );
 
   assert.deepEqual(result, { protocol: 1 });
   assert.equal(calls.length, 2);
-  assert.match(calls[1].command, /^python3 -c /);
+  assert.match(calls[0].command, /persistent-terminal-mcp/u);
+  assert.equal(calls[0].stdin, helperSource);
+  assert.match(calls[1].command, /^python3 /u);
   assert.equal(calls[1].command.includes(path), false);
   assert.equal(calls[1].stdin, JSON.stringify({ op: 'protocol_ping', path }));
+});
+
+test('remote helper installation is cached per target and source hash', async () => {
+  const calls = [];
+  const cache = createRemoteFsCache();
+  const execImpl = async (request) => {
+    calls.push(structuredClone(request));
+    if (/command -v python3/u.test(request.command)) return commandResult();
+    return commandResult({ stdout: JSON.stringify({ ok: true, result: { protocol: 1 } }) });
+  };
+
+  await callRemoteFs('test-host', { op: 'protocol_ping' }, {
+    execImpl,
+    helperSource: 'print("helper")',
+    cache,
+  });
+  await callRemoteFs('test-host', { op: 'protocol_ping' }, {
+    execImpl,
+    helperSource: 'print("helper")',
+    cache,
+  });
+
+  assert.equal(calls.length, 3, 'first call installs + runs; second call only runs');
+  assert.equal(calls.filter((call) => /command -v python3/u.test(call.command)).length, 1);
+  assert.equal(calls.filter((call) => call.stdin === 'print("helper")').length, 1);
 });
 
 test('transport failures from the existing remote execution layer are not reclassified', async () => {

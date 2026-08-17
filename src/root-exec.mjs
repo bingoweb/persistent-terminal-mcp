@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
-import { readRootTargets } from './config.mjs';
+import { isRootTargetAllowed } from './config.mjs';
 import { TerminalError } from './errors.mjs';
 import { remoteExec } from './remote-exec.mjs';
 import { quotePosix } from './ssh-runner.mjs';
@@ -331,13 +331,12 @@ export async function remoteRootExec(
 ) {
   validateRequest(request);
   const target = request.target.trim();
-  const allowedTargets = readRootTargets(env);
   const attempts = [];
 
-  if (!allowedTargets.has(target)) {
+  if (!isRootTargetAllowed(target, env)) {
     throw new TerminalError(
       'permission_privilege_error',
-      `Root execution is not allowlisted for target: ${target}`,
+      `Root execution is not enabled by PTEXT_ROOT_TARGETS for target: ${target}`,
       { details: { target, attempts } },
     );
   }
@@ -431,7 +430,7 @@ export async function remoteRootExec(
 
   throw new TerminalError(
     'permission_privilege_error',
-    `Unable to obtain root access on allowlisted target: ${target}`,
+    `Unable to obtain root access on root-policy-enabled target: ${target}`,
     { details: { target, attempts } },
   );
 }

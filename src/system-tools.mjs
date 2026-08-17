@@ -234,9 +234,9 @@ export const SYSTEM_READ_TOOL_NAMES = new Set(SYSTEM_READ_TOOLS.map((tool) => to
 
 const PRIVILEGE_PROPERTY = Object.freeze({
   type: 'string',
-  enum: ['user', 'root'],
-  default: 'user',
-  description: 'Execution privilege is explicit; root uses best-effort root acquisition and is never selected automatically.',
+  enum: ['auto', 'user', 'root'],
+  default: 'auto',
+  description: 'auto tries the configured user first and escalates through the best-effort root provider only on a privilege denial; user forbids escalation; root starts privileged.',
 });
 
 const MUTATION_SUCCESS_SCHEMA = Object.freeze({
@@ -257,7 +257,7 @@ const MUTATION_SUCCESS_SCHEMA = Object.freeze({
       ],
     },
     pid: { type: ['integer', 'null'], minimum: 1 },
-    signal: { type: ['integer', 'null'], minimum: 1, maximum: 64 },
+    signal: { type: ['integer', 'null'], minimum: 0, maximum: 64 },
     service: { type: ['string', 'null'] },
     exit_code: { type: ['integer', 'null'] },
     stdout: { type: 'string' },
@@ -280,13 +280,18 @@ function mutationOutputSchema() {
 export const SYSTEM_MUTATION_TOOLS = Object.freeze([
   Object.freeze({
     name: 'process_signal',
-    description: 'Send one validated numeric signal to one remote PID. Runs as the configured user unless privilege root is explicitly requested.',
+    description: 'Send one validated numeric signal to one remote PID. privilege=auto (default) tries the configured user and escalates only on a privilege denial; user forbids escalation and root starts privileged.',
     inputSchema: {
       type: 'object',
       properties: {
         target: { type: 'string', minLength: 1 },
         pid: { type: 'integer', minimum: 1 },
-        signal: { type: 'integer', minimum: 1, maximum: 64 },
+        signal: {
+          type: 'integer',
+          minimum: 0,
+          maximum: 64,
+          description: 'Numeric signal. 0 performs a permission/existence probe without delivering a signal.',
+        },
         privilege: PRIVILEGE_PROPERTY,
       },
       required: ['target', 'pid', 'signal'],
@@ -296,7 +301,7 @@ export const SYSTEM_MUTATION_TOOLS = Object.freeze([
   }),
   ...['start', 'stop', 'restart'].map((action) => Object.freeze({
     name: `service_${action}`,
-    description: `${action[0].toUpperCase()}${action.slice(1)} one exact systemd .service unit. Runs as the configured user unless privilege root is explicitly requested.`,
+    description: `${action[0].toUpperCase()}${action.slice(1)} one exact systemd .service unit. privilege=auto (default) tries the configured user and escalates only on a privilege denial; user forbids escalation and root starts privileged.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -355,9 +360,9 @@ function validateMutationTarget(args) {
   if (typeof args.target !== 'string' || args.target.trim() === '' || args.target.includes('\0')) {
     throw new TerminalError('validation_error', 'target must be a non-empty string without NUL bytes');
   }
-  const privilege = args.privilege ?? 'user';
-  if (!['user', 'root'].includes(privilege)) {
-    throw new TerminalError('validation_error', 'privilege must be user or root');
+  const privilege = args.privilege ?? 'auto';
+  if (!['auto', 'user', 'root'].includes(privilege)) {
+    throw new TerminalError('validation_error', 'privilege must be auto, user or root');
   }
   return { target: args.target.trim(), privilege };
 }
@@ -411,6 +416,16 @@ async function executeMutation(
   });
 
   if (executed.exit_code !== 0 && permissionFailure(executed.stderr)) {
+    if (metadata.privilege === 'auto') {
+      const elevated = await rootExecImpl(
+        { target: metadata.target, command: rootCommand },
+        { upstreamClient },
+      );
+      return normalizedMutation(
+        { ...metadata, privilege: 'root', strategy: elevated.strategy ?? null },
+        elevated,
+      );
+    }
     throw new TerminalError(
       'permission_privilege_error',
       `${metadata.toolName} requires privileges not available to the configured remote user`,
@@ -418,7 +433,7 @@ async function executeMutation(
         details: {
           action: metadata.action,
           target: metadata.target,
-          privilege: 'user',
+          privilege: metadata.privilege,
           exit_code: executed.exit_code,
           stderr: executed.stderr ?? '',
         },
@@ -426,7 +441,7 @@ async function executeMutation(
     );
   }
 
-  return normalizedMutation(metadata, executed);
+  return normalizedMutation({ ...metadata, privilege: 'user' }, executed);
 }
 
 async function callMutationTool(
@@ -440,8 +455,8 @@ async function callMutationTool(
     if (!Number.isInteger(args.pid) || args.pid < 1) {
       throw new TerminalError('validation_error', 'pid must be a positive integer');
     }
-    if (!Number.isInteger(args.signal) || args.signal < 1 || args.signal > 64) {
-      throw new TerminalError('validation_error', 'signal must be an integer between 1 and 64');
+    if (!Number.isInteger(args.signal) || args.signal < 0 || args.signal > 64) {
+      throw new TerminalError('validation_error', 'signal must be an integer between 0 and 64');
     }
     const command = `kill -${args.signal} ${args.pid}`;
     return executeMutation(

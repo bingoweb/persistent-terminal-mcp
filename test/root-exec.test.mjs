@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { readDockerRootTargets, readRootTargets } from '../src/config.mjs';
+import { isRootTargetAllowed, readDockerRootTargets, readRootTargets } from '../src/config.mjs';
 import { remoteRootExec } from '../src/root-exec.mjs';
 
 function commandResult(overrides = {}) {
@@ -38,6 +38,21 @@ test('root target allowlist is explicit and preserves the legacy Docker target s
     })],
     ['taylan', 'lab'],
   );
+  assert.equal(isRootTargetAllowed('taylan', { PTEXT_ROOT_TARGETS: '*' }), true);
+  assert.equal(isRootTargetAllowed('arbitrary-configured-host', { PTEXT_ROOT_TARGETS: '*' }), true);
+  assert.equal(isRootTargetAllowed('other-host', { PTEXT_ROOT_TARGETS: 'taylan,lab' }), false);
+});
+
+test('root wildcard policy permits any explicitly requested OpenSSH target', async () => {
+  const result = await remoteRootExec(
+    { target: 'lab-host', command: 'id -u' },
+    {
+      env: { PTEXT_ROOT_TARGETS: '*' },
+      remoteExecImpl: async () => commandResult({ stdout: '0\n' }),
+    },
+  );
+  assert.equal(result.strategy, 'direct_root');
+  assert.equal(result.target, 'lab-host');
 });
 
 test('already-root SSH user is selected immediately and no escalation provider is touched', async () => {
@@ -300,7 +315,8 @@ test('unknown target is denied before any root probe or password prompt', async 
         upstreamClient: { callTool: async () => { upstreamCalls += 1; return toolResult({}); } },
       },
     ),
-    (error) => error?.category === 'permission_privilege_error' && /not allowlisted/i.test(error.message),
+    (error) => error?.category === 'permission_privilege_error'
+      && /not enabled by PTEXT_ROOT_TARGETS/i.test(error.message),
   );
   assert.equal(execCalls, 0);
   assert.equal(upstreamCalls, 0);

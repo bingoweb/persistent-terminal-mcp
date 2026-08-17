@@ -6,7 +6,7 @@ This project started from a fairly simple problem: most SSH MCP wrappers tie the
 
 Persistent Terminal MCP keeps those two things separate. Interactive sessions are backed by [`pty-mcp`](https://github.com/raychao-oao/pty-mcp) and remote `ai-tmux`; structured operations use native OpenSSH. If the local MCP process disappears, the remote PTY can stay alive and be attached again later.
 
-Current release line: **0.9.0 stable pre-1.0**. The planned core through observability/recovery is implemented and acceptance-tested. Major version zero is deliberate: the service is suitable for real deployment, while the public MCP tool surface is still allowed to evolve before a future `1.0.0` API freeze.
+Current release line: **0.10.0 stable pre-1.0**. The planned core through observability/recovery is implemented and acceptance-tested. Major version zero is deliberate: the service is suitable for real deployment, while the public MCP tool surface is still allowed to evolve before a future `1.0.0` API freeze.
 
 ## What works now
 

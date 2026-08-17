@@ -2,6 +2,25 @@
 
 This project follows Semantic Versioning. While the major version is `0`, the MCP tool surface may still change between minor releases; patch releases are reserved for compatible fixes within a minor line.
 
+## [0.10.0] - 2026-08-17
+
+High-trust administration and hot-path performance audit.
+
+### Changed
+
+- administrative process/service mutations now default to `privilege:auto`, escalating through the existing root provider only after an observed privilege denial; explicit `user` and `root` modes remain available;
+- root policy accepts `PTEXT_ROOT_TARGETS=*` for installations where all explicitly requested configured OpenSSH targets are intentionally administrable;
+- `process_signal` accepts signal `0` as a non-delivering existence/permission probe;
+- ordinary `remote_exec` no longer pays for a redundant `ssh -G` subprocess before each real SSH command;
+- the structured remote-filesystem Python helper is content-addressed and cached per target instead of being probed and retransmitted on every filesystem operation;
+- lifecycle state is cached in-process after the initial disk read while retaining atomic persisted updates.
+
+### Verified
+
+- complete deterministic quality gate and license inventory;
+- direct live source-path execution against the `taylan` target;
+- deployed extension `tools/list` reports the new privilege/signal schemas and live signal-0 auto escalation selects `docker_host_root` without delivering a signal.
+
 ## [0.9.0] - 2026-08-17
 
 First stable pre-1.0 release.

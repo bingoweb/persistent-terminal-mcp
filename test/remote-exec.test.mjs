@@ -79,14 +79,13 @@ test('ssh host-key or authentication failures keep their own category', async ()
 });
 
 test('runner preserves ssh alias and safely carries cwd env and stdin', async () => {
-  let invocation;
+  const invocations = [];
   let child;
   const spawnImpl = (command, args, options) => {
-    invocation = { command, args, options };
+    invocations.push({ command, args, options });
     child = fakeChild({ stdout: 'ok' });
     return child;
   };
-  const resolveTargetImpl = async (alias) => ({ alias });
 
   const result = await runSshCommand(
     'test-host',
@@ -98,9 +97,11 @@ test('runner preserves ssh alias and safely carries cwd env and stdin', async ()
       timeout_ms: 1000,
       max_output_bytes: 1024,
     },
-    { spawnImpl, resolveTargetImpl },
+    { spawnImpl },
   );
 
+  assert.equal(invocations.length, 1, 'remote execution must not pre-spawn ssh -G');
+  const invocation = invocations[0];
   assert.equal(invocation.command, 'ssh');
   assert.deepEqual(invocation.args.slice(0, 5), [
     '-T', '-o', 'BatchMode=yes', 'test-host', '--',
@@ -119,7 +120,6 @@ test('runner caps collected output while continuing to drain streams', async () 
     { command: 'big-output', max_output_bytes: 8 },
     {
       spawnImpl: () => fakeChild({ stdout: 'abcdefghij', stderr: 'KLMNOPQRST' }),
-      resolveTargetImpl: async (alias) => ({ alias }),
     },
   );
 
@@ -134,7 +134,6 @@ test('runner terminates a command on timeout and reports timed_out', async () =>
     { command: 'sleep 60', timeout_ms: 5 },
     {
       spawnImpl: () => child,
-      resolveTargetImpl: async (alias) => ({ alias }),
     },
   );
 
@@ -160,7 +159,6 @@ test('runner rejects invalid stdin before spawning ssh', async () => {
       { command: 'cat', stdin: { unsafe: true } },
       {
         spawnImpl: () => { spawnCalls += 1; return fakeChild(); },
-        resolveTargetImpl: async (alias) => ({ alias }),
       },
     ),
     /stdin must be a string or Buffer/i,

@@ -1,16 +1,25 @@
 import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 
 import { ERROR_CATEGORIES, TerminalError } from './errors.mjs';
 import { remoteExec } from './remote-exec.mjs';
-import { quotePosix } from './ssh-runner.mjs';
 
 const HELPER_URL = new URL('../helpers/remote_fs.py', import.meta.url);
-const PYTHON_PROBE = 'command -v python3 >/dev/null 2>&1';
 const PATH_FIELDS = Object.freeze(['path', 'source_path', 'destination_path']);
-const PROBE_TIMEOUT_MS = 10_000;
+const INSTALL_TIMEOUT_MS = 15_000;
 const HELPER_TIMEOUT_MS = 60_000;
-const PROBE_OUTPUT_BYTES = 4096;
+const INSTALL_OUTPUT_BYTES = 4096;
 const HELPER_OUTPUT_BYTES = 1024 * 1024;
+let helperSourcePromise = null;
+
+export function createRemoteFsCache() {
+  return {
+    ready: new Set(),
+    pending: new Map(),
+  };
+}
+
+const defaultCache = createRemoteFsCache();
 
 function validateTarget(target) {
   if (typeof target !== 'string' || target.trim() === '') {
@@ -95,7 +104,69 @@ function parseEnvelope(stdout) {
 }
 
 async function defaultHelperSource() {
-  return readFile(HELPER_URL, 'utf8');
+  helperSourcePromise ??= readFile(HELPER_URL, 'utf8');
+  return helperSourcePromise;
+}
+
+function helperHash(source) {
+  return createHash('sha256').update(source, 'utf8').digest('hex');
+}
+
+function helperCommand(hash) {
+  return `python3 "\${XDG_CACHE_HOME:-$HOME/.cache}/persistent-terminal-mcp/remote_fs_${hash}.py"`;
+}
+
+function installerCommand(hash) {
+  return [
+    'command -v python3 >/dev/null 2>&1 || exit 127',
+    'umask 077',
+    'PTEXT_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/persistent-terminal-mcp"',
+    `PTEXT_HELPER="$PTEXT_CACHE_DIR/remote_fs_${hash}.py"`,
+    'mkdir -p "$PTEXT_CACHE_DIR"',
+    'PTEXT_TMP="$PTEXT_HELPER.$$"',
+    'cat > "$PTEXT_TMP"',
+    'chmod 700 "$PTEXT_TMP"',
+    'mv -f "$PTEXT_TMP" "$PTEXT_HELPER"',
+  ].join('; ');
+}
+
+async function ensureHelper(target, source, hash, execImpl, cache) {
+  const key = `${target}\n${hash}`;
+  if (cache.ready.has(key)) return;
+  if (cache.pending.has(key)) return cache.pending.get(key);
+
+  const pending = (async () => {
+    const installed = await execImpl({
+      target,
+      command: installerCommand(hash),
+      stdin: source,
+      timeout_ms: INSTALL_TIMEOUT_MS,
+      max_output_bytes: INSTALL_OUTPUT_BYTES,
+    });
+    assertCommandCompleted(installed, 'Remote filesystem helper install');
+    if (installed.exit_code === 127) {
+      throw new TerminalError(
+        'missing_remote_capability',
+        'Remote target does not provide python3',
+        { details: { exit_code: installed.exit_code } },
+      );
+    }
+    if (installed.exit_code !== 0) {
+      throw new TerminalError(
+        'remote_command_nonzero_exit',
+        installed.stderr || `Remote filesystem helper install exited with status ${installed.exit_code}`,
+        { details: { exit_code: installed.exit_code } },
+      );
+    }
+    cache.ready.add(key);
+  })();
+
+  cache.pending.set(key, pending);
+  try {
+    await pending;
+  } finally {
+    cache.pending.delete(key);
+  }
 }
 
 export async function callRemoteFs(
@@ -105,25 +176,11 @@ export async function callRemoteFs(
     execImpl = remoteExec,
     helperSource,
     helperSourceLoader = defaultHelperSource,
+    cache = defaultCache,
   } = {},
 ) {
   validateTarget(target);
   validateRequest(request);
-
-  const probe = await execImpl({
-    target,
-    command: PYTHON_PROBE,
-    timeout_ms: PROBE_TIMEOUT_MS,
-    max_output_bytes: PROBE_OUTPUT_BYTES,
-  });
-  assertCommandCompleted(probe, 'Remote python3 probe');
-  if (probe.exit_code !== 0) {
-    throw new TerminalError(
-      'missing_remote_capability',
-      'Remote target does not provide python3',
-      { details: { exit_code: probe.exit_code } },
-    );
-  }
 
   const source = helperSource ?? await helperSourceLoader();
   if (typeof source !== 'string' || source.length === 0) {
@@ -132,10 +189,15 @@ export async function callRemoteFs(
       'Remote filesystem helper source is unavailable',
     );
   }
+  if (!cache || !(cache.ready instanceof Set) || !(cache.pending instanceof Map)) {
+    throw new TerminalError('validation_error', 'remote filesystem cache is invalid');
+  }
+  const hash = helperHash(source);
+  await ensureHelper(target, source, hash, execImpl, cache);
 
   const execution = await execImpl({
     target,
-    command: `python3 -c ${quotePosix(source)}`,
+    command: helperCommand(hash),
     stdin: JSON.stringify(request),
     timeout_ms: HELPER_TIMEOUT_MS,
     max_output_bytes: HELPER_OUTPUT_BYTES,

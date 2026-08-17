@@ -25,7 +25,9 @@ This project therefore focuses on preserving operator intent and preventing acci
 
 - Normal remote execution is unprivileged by default.
 - Privileged/root execution will use separately named, explicit tools/providers.
-- No generic retry path may silently escalate privileges.
+- `remote_exec` and generic retry paths never silently escalate privileges.
+- Administrative mutation tools may use the schema-visible `privilege: auto` mode: they try the configured user first and enter the root provider only after a concrete privilege-denial result. `privilege: user` remains a strict no-escalation mode and `privilege: root` starts privileged immediately.
+- `PTEXT_ROOT_TARGETS` may list exact target aliases or `*`. The wildcard is an operator-selected high-trust policy for installations where every configured OpenSSH target is intentionally administrable; it does not alter host-key verification or secret handling.
 
 ### Session isolation
 
@@ -42,7 +44,7 @@ This project therefore focuses on preserving operator intent and preventing acci
 
 ## Future privileged providers
 
-Privileged providers must be capability-checked, explicitly requested, separately tested, and visible in audit metadata. `remote_root_exec` may try multiple root providers on an allowlisted target (already-root SSH, passwordless sudo, Docker host-root, interactive sudo, or `su - root`), but ordinary `remote_exec` never enters this path. Password-based providers may request a secret only through the upstream PTY secret-safe GUI after the terminal is confirmed to be waiting for password input; password bytes must not enter ordinary tool arguments, logs, persisted state, or AI context.
+Privileged providers must be capability-checked, explicitly reachable through a privileged tool contract, separately tested, and visible in audit metadata. `remote_root_exec` may try multiple root providers on a root-policy-enabled target (already-root SSH, passwordless sudo, Docker host-root, interactive sudo, or `su - root`), but ordinary `remote_exec` never enters this path. Administrative mutation tools may enter the same provider only through their declared `privilege: auto|root` contract. Password-based providers may request a secret only through the upstream PTY secret-safe GUI after the terminal is confirmed to be waiting for password input; password bytes must not enter ordinary tool arguments, logs, persisted state, or AI context.
 
 ## Dependency and supply-chain controls
 

@@ -21,7 +21,7 @@ test('remote_root_exec schema makes best-effort root acquisition explicit in nam
   assert.deepEqual(ROOT_EXEC_TOOL.inputSchema.properties.target, {
     type: 'string',
     minLength: 1,
-    description: 'Explicitly allowlisted native OpenSSH host or alias.',
+    description: 'Native OpenSSH host or alias permitted by PTEXT_ROOT_TARGETS; * enables all explicitly requested configured targets.',
   });
   assert.deepEqual(ROOT_EXEC_TOOL.inputSchema.properties.command, {
     type: 'string',

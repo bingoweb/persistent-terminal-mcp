@@ -9,11 +9,11 @@ async function readJson(url) {
   return JSON.parse(await fs.readFile(url, 'utf8'));
 }
 
-test('v0.9.0 release version is single-source across package, lock, and runtime metadata', async () => {
+test('current release version is single-source across package, lock, and runtime metadata', async () => {
   const packageJson = await readJson(packageUrl);
   const packageLock = await readJson(lockUrl);
 
-  assert.equal(packageJson.version, '0.9.0');
+  assert.equal(packageJson.version, '0.10.0');
   assert.equal(packageLock.version, packageJson.version);
   assert.equal(packageLock.packages[''].version, packageJson.version);
 
@@ -28,7 +28,7 @@ test('v0.9.0 release version is single-source across package, lock, and runtime 
   assert.doesNotMatch(upstreamSource, /version:\s*['"]0\.1\.0['"]/u);
 });
 
-test('v0.9.0 release documentation and verification command are present and consistent', async () => {
+test('current release documentation and verification command are present and consistent', async () => {
   const packageJson = await readJson(packageUrl);
   const read = async (relative) => fs.readFile(new URL(relative, import.meta.url), 'utf8');
 
@@ -36,14 +36,14 @@ test('v0.9.0 release documentation and verification command are present and cons
 
   const readme = await read('../README.md');
   assert.match(readme, /stable pre-1\.0/iu);
-  assert.match(readme, /0\.9\.0/u);
+  assert.match(readme, new RegExp(packageJson.version.replaceAll('.', '\\.')));
   assert.doesNotMatch(readme, /still pre-release/iu);
 
   const changelog = await read('../CHANGELOG.md');
-  assert.match(changelog, /^## \[0\.9\.0\] - 2026-08-17$/mu);
+  assert.match(changelog, new RegExp(`^## \\[${packageJson.version.replaceAll('.', '\\.')}\\] - 2026-08-17$`, 'mu'));
 
-  const releaseNotes = await read('../docs/releases/v0.9.0.md');
-  assert.match(releaseNotes, /^# Persistent Terminal MCP v0\.9\.0$/mu);
+  const releaseNotes = await read(`../docs/releases/v${packageJson.version}.md`);
+  assert.match(releaseNotes, new RegExp(`^# Persistent Terminal MCP v${packageJson.version.replaceAll('.', '\\.')}$`, 'mu'));
   assert.match(releaseNotes, /SHA-256/iu);
   assert.match(releaseNotes, /CycloneDX/iu);
   assert.match(releaseNotes, /rollback/iu);

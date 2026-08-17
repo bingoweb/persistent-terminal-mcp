@@ -22,7 +22,7 @@ function commandResult(overrides = {}) {
 
 const MUTATION_NAMES = ['process_signal', 'service_start', 'service_stop', 'service_restart'];
 
-test('controlled mutation tools publish closed schemas with explicit privilege selection', () => {
+test('controlled mutation tools publish closed schemas with capability-first privilege selection', () => {
   for (const name of MUTATION_NAMES) {
     const tool = SYSTEM_TOOLS.find((candidate) => candidate.name === name);
     assert.ok(tool, `missing ${name}`);
@@ -31,9 +31,9 @@ test('controlled mutation tools publish closed schemas with explicit privilege s
     assert.equal(tool.inputSchema.additionalProperties, false);
     assert.deepEqual(tool.inputSchema.properties.privilege, {
       type: 'string',
-      enum: ['user', 'root'],
-      default: 'user',
-      description: 'Execution privilege is explicit; root uses best-effort root acquisition and is never selected automatically.',
+      enum: ['auto', 'user', 'root'],
+      default: 'auto',
+      description: 'auto tries the configured user first and escalates through the best-effort root provider only on a privilege denial; user forbids escalation; root starts privileged.',
     });
     assert.equal(tool.outputSchema.oneOf.length, 2);
   }
@@ -51,7 +51,7 @@ test('process_signal validates numeric PID and signal before executing anything'
     { target: 'taylan', pid: '42', signal: 15 },
     { target: 'taylan', pid: 0, signal: 15 },
     { target: 'taylan', pid: 42, signal: '15' },
-    { target: 'taylan', pid: 42, signal: 0 },
+    { target: 'taylan', pid: 42, signal: -1 },
     { target: 'taylan', pid: 42, signal: 65 },
   ]) {
     const result = await callSystemTool('process_signal', args, deps);
@@ -63,7 +63,26 @@ test('process_signal validates numeric PID and signal before executing anything'
   assert.equal(rootCalls, 0);
 });
 
-test('process_signal defaults to configured user execution and returns action/target/exit metadata', async () => {
+test('process_signal accepts signal 0 as a non-delivering existence/permission probe', async () => {
+  const calls = [];
+  const result = await callSystemTool(
+    'process_signal',
+    { target: 'taylan', pid: 1, signal: 0, privilege: 'user' },
+    {
+      remoteExecImpl: async (request) => {
+        calls.push(structuredClone(request));
+        return commandResult();
+      },
+    },
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, 'kill -0 1');
+  assert.equal(result.structuredContent.signal, 0);
+  assert.equal(result.structuredContent.exit_code, 0);
+});
+
+test('process_signal auto mode stays unprivileged when configured-user execution succeeds', async () => {
   const calls = [];
   const result = await callSystemTool(
     'process_signal',
@@ -101,11 +120,39 @@ test('process_signal defaults to configured user execution and returns action/ta
   });
 });
 
-test('user-mode permission failure is permission_privilege_error and never falls back to root', async () => {
+test('auto mode escalates exactly once through the root provider on a privilege denial', async () => {
   let rootCalls = 0;
   const result = await callSystemTool(
     'service_restart',
     { target: 'taylan', service: 'ssh.service' },
+    {
+      remoteExecImpl: async () => commandResult({
+        exit_code: 1,
+        stderr: 'Failed to restart ssh.service: Interactive authentication required.\n',
+      }),
+      rootExecImpl: async () => {
+        rootCalls += 1;
+        return {
+          strategy: 'docker_host_root',
+          target: 'taylan',
+          ...commandResult({ stdout: 'restarted\n' }),
+        };
+      },
+    },
+  );
+
+  assert.equal(rootCalls, 1);
+  assert.equal(result.isError, undefined);
+  assert.equal(result.structuredContent.privilege, 'root');
+  assert.equal(result.structuredContent.strategy, 'docker_host_root');
+  assert.equal(result.structuredContent.stdout, 'restarted\n');
+});
+
+test('explicit user mode preserves a strict no-escalation boundary', async () => {
+  let rootCalls = 0;
+  const result = await callSystemTool(
+    'service_restart',
+    { target: 'taylan', service: 'ssh.service', privilege: 'user' },
     {
       remoteExecImpl: async () => commandResult({
         exit_code: 1,
@@ -120,18 +167,7 @@ test('user-mode permission failure is permission_privilege_error and never falls
 
   assert.equal(rootCalls, 0);
   assert.equal(result.isError, true);
-  assert.deepEqual(result.structuredContent, {
-    category: 'permission_privilege_error',
-    message: 'service_restart requires privileges not available to the configured remote user',
-    retryable: false,
-    details: {
-      action: 'restart',
-      target: 'taylan',
-      privilege: 'user',
-      exit_code: 1,
-      stderr: 'Failed to restart ssh.service: Interactive authentication required.\n',
-    },
-  });
+  assert.equal(result.structuredContent.category, 'permission_privilege_error');
 });
 
 test('explicit root process signal routes only to the best-effort root provider and stays visibly privileged', async () => {
@@ -222,7 +258,7 @@ test('explicit root service mutation uses only best-effort root provider with va
   assert.equal(response.structuredContent.strategy, 'docker_host_root');
 });
 
-test('ordinary non-permission command failure remains an explicit exit result instead of escalating', async () => {
+test('auto mode keeps ordinary non-permission command failures unprivileged and does not escalate', async () => {
   let rootCalls = 0;
   const response = await callSystemTool(
     'process_signal',

@@ -86,9 +86,25 @@ export function createStateStore(statePath = DEFAULT_STATE_PATH, { fsImpl = fs }
   }
 
   let updateQueue = Promise.resolve();
+  let cachedState = null;
+  let initialReadPromise = null;
+
+  async function load() {
+    if (cachedState !== null) return cachedState;
+    if (initialReadPromise) return initialReadPromise;
+    initialReadPromise = readState(statePath, fsImpl)
+      .then((state) => {
+        cachedState = state;
+        return state;
+      })
+      .finally(() => {
+        initialReadPromise = null;
+      });
+    return initialReadPromise;
+  }
 
   async function read() {
-    return readState(statePath, fsImpl);
+    return structuredClone(await load());
   }
 
   async function performUpdate(mutator) {
@@ -96,12 +112,13 @@ export function createStateStore(statePath = DEFAULT_STATE_PATH, { fsImpl = fs }
       throw new TerminalError('validation_error', 'State update requires a mutator function');
     }
 
-    const current = await read();
+    const current = await load();
     const draft = structuredClone(current);
     const replacement = await mutator(draft);
     const next = validateState(replacement === undefined ? draft : replacement);
 
     await atomicWrite(statePath, next, fsImpl);
+    cachedState = structuredClone(next);
     return structuredClone(next);
   }
 
