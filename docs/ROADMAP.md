@@ -100,15 +100,40 @@ Cancellation sends Ctrl-C only to the verified recorded task PTY. `terminate_ses
 
 Live acceptance starts a roughly 45-second timestamped task, abruptly kills the local extension process, restarts it with the same persisted state, recovers the original remote session, waits for the original task ID to exit successfully, and proves that recovery did not create a second task or remote session.
 
-## M7 — Explicit privilege and system helpers
+## M7 — Explicit privilege and system helpers — implemented
 
-Planned privileged tool:
+Implemented privileged tool:
 
 ```text
 remote_root_exec
 ```
 
-Planned helpers include process/service/port/journal/disk/GPU operations. Privilege is explicit and never an automatic fallback from ordinary execution.
+`remote_root_exec` is allowlisted and performs auditable best-effort root acquisition in this order: already-root SSH, passwordless sudo, Docker host-root, secret-safe interactive sudo, then secret-safe `su - root`. Password dialogs are opened only after the upstream PTY confirms that a password prompt is active, so secret bytes do not travel through ordinary tool arguments or AI-visible logs/state.
+
+Implemented read-only helpers:
+
+```text
+system_info
+process_list
+port_list
+service_status
+journal_read
+disk_usage
+gpu_info
+```
+
+Implemented controlled mutations:
+
+```text
+process_signal
+service_start
+service_stop
+service_restart
+```
+
+Mutation tools default to `privilege:'user'` and never silently retry as root. The caller must explicitly request `privilege:'root'`, which routes through the same best-effort root provider and reports the selected strategy.
+
+Live acceptance on the `taylan` test target proved ordinary `remote_exec` remained UID 1000, explicit root execution selected `docker_host_root` and returned UID 0, and normalized system, disk, GPU and `ssh.service` inspection succeeded without mutating production services.
 
 ## M8 — Observability, fault injection, deployment
 

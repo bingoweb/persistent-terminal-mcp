@@ -42,7 +42,7 @@ This project therefore focuses on preserving operator intent and preventing acci
 
 ## Future privileged providers
 
-Privileged providers (for example Docker-based host-root access) must be capability-checked, explicitly requested, separately tested, and visible in audit metadata. They must not be implicit fallbacks.
+Privileged providers must be capability-checked, explicitly requested, separately tested, and visible in audit metadata. `remote_root_exec` may try multiple root providers on an allowlisted target (already-root SSH, passwordless sudo, Docker host-root, interactive sudo, or `su - root`), but ordinary `remote_exec` never enters this path. Password-based providers may request a secret only through the upstream PTY secret-safe GUI after the terminal is confirmed to be waiting for password input; password bytes must not enter ordinary tool arguments, logs, persisted state, or AI context.
 
 ## Dependency and supply-chain controls
 

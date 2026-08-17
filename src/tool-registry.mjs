@@ -3,7 +3,9 @@ import { FORWARD_TOOLS, FORWARD_TOOL_NAMES, callForwardTool } from './forward-to
 import { buildLegacyAliasTools, resolveLegacyAliasCall } from './legacy-aliases.mjs';
 import { remoteExec } from './remote-exec.mjs';
 import { REMOTE_FS_TOOLS, REMOTE_FS_TOOL_NAMES, callRemoteFsTool } from './remote-fs-tools.mjs';
+import { remoteRootExec } from './root-exec.mjs';
 import { SESSION_TOOLS, SESSION_TOOL_NAMES, callSessionTool } from './session-tools.mjs';
+import { SYSTEM_TOOLS, SYSTEM_TOOL_NAMES, callSystemTool } from './system-tools.mjs';
 import { TASK_TOOLS, TASK_TOOL_NAMES, callTaskTool } from './task-tools.mjs';
 import { TRANSFER_TOOLS, TRANSFER_TOOL_NAMES, callTransferTool } from './transfer-tools.mjs';
 
@@ -71,13 +73,101 @@ export const REMOTE_EXEC_TOOL = Object.freeze({
   },
 });
 
+export const ROOT_EXEC_TOOL = Object.freeze({
+  name: 'remote_root_exec',
+  description: 'Execute an explicitly privileged command as UID 0 on an allowlisted remote target using best-effort root acquisition. The provider may use an already-root SSH user, passwordless sudo, Docker host-root, or a secret-safe interactive password gate. This is never an implicit fallback from remote_exec.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      target: {
+        type: 'string',
+        minLength: 1,
+        description: 'Explicitly allowlisted native OpenSSH host or alias.',
+      },
+      command: {
+        type: 'string',
+        minLength: 1,
+        description: 'Command to execute as UID 0 after an explicit root provider succeeds.',
+      },
+      timeout_ms: { type: 'integer', minimum: 1 },
+      max_output_bytes: { type: 'integer', minimum: 1 },
+    },
+    required: ['target', 'command'],
+    additionalProperties: false,
+  },
+  outputSchema: {
+    type: 'object',
+    oneOf: [
+      {
+        type: 'object',
+        properties: {
+          strategy: {
+            type: 'string',
+            enum: [
+              'direct_root',
+              'sudo_nopasswd',
+              'docker_host_root',
+              'sudo_password',
+              'su_root_password',
+            ],
+            description: 'Explicit privileged execution strategy used for this call.',
+          },
+          target: { type: 'string' },
+          exit_code: { type: ['integer', 'null'] },
+          stdout: { type: 'string' },
+          stderr: { type: 'string' },
+          duration_ms: { type: 'number' },
+          timed_out: { type: 'boolean' },
+          truncated: { type: 'boolean' },
+          attempts: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                strategy: {
+                  type: 'string',
+                  enum: [
+                    'direct_root',
+                    'sudo_nopasswd',
+                    'docker_host_root',
+                    'sudo_password',
+                    'su_root_password',
+                  ],
+                },
+                status: { type: 'string', enum: ['selected', 'unavailable'] },
+              },
+              required: ['strategy', 'status'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: [
+          'strategy',
+          'target',
+          'exit_code',
+          'stdout',
+          'stderr',
+          'duration_ms',
+          'timed_out',
+          'truncated',
+          'attempts',
+        ],
+        additionalProperties: false,
+      },
+      REMOTE_EXEC_TOOL.outputSchema.oneOf[1],
+    ],
+  },
+});
+
 export const LOCAL_TOOLS = Object.freeze([
   REMOTE_EXEC_TOOL,
+  ROOT_EXEC_TOOL,
   ...SESSION_TOOLS,
   ...REMOTE_FS_TOOLS,
   ...TRANSFER_TOOLS,
   ...FORWARD_TOOLS,
   ...TASK_TOOLS,
+  ...SYSTEM_TOOLS,
 ]);
 
 export function buildToolCatalog({ upstreamTools = [], localTools = LOCAL_TOOLS } = {}) {
@@ -121,16 +211,35 @@ export async function callTool(
     upstreamClient,
     upstreamToolNames,
     remoteExecImpl = remoteExec,
+    rootExecImpl = remoteRootExec,
     sessionToolCallImpl = callSessionTool,
     remoteFsToolCallImpl = callRemoteFsTool,
     transferToolCallImpl = callTransferTool,
     forwardToolCallImpl = callForwardTool,
     taskToolCallImpl = callTaskTool,
+    systemToolCallImpl = callSystemTool,
   },
 ) {
   if (name === REMOTE_EXEC_TOOL.name) {
     try {
       const result = await remoteExecImpl(args ?? {});
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result) }],
+        structuredContent: result,
+      };
+    } catch (error) {
+      const failure = normalizeFailure(error);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(failure) }],
+        structuredContent: failure,
+        isError: true,
+      };
+    }
+  }
+
+  if (name === ROOT_EXEC_TOOL.name) {
+    try {
+      const result = await rootExecImpl(args ?? {}, { upstreamClient });
       return {
         content: [{ type: 'text', text: JSON.stringify(result) }],
         structuredContent: result,
@@ -165,17 +274,23 @@ export async function callTool(
     return taskToolCallImpl(name, args ?? {});
   }
 
+  if (SYSTEM_TOOL_NAMES.has(name)) {
+    return systemToolCallImpl(name, args ?? {}, { upstreamClient });
+  }
+
   const legacy = resolveLegacyAliasCall(name, args ?? {});
   if (legacy) {
     return callTool(legacy.target, legacy.args, {
       upstreamClient,
       upstreamToolNames,
       remoteExecImpl,
+      rootExecImpl,
       sessionToolCallImpl,
       remoteFsToolCallImpl,
       transferToolCallImpl,
       forwardToolCallImpl,
       taskToolCallImpl,
+      systemToolCallImpl,
     });
   }
 
