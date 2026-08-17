@@ -6,7 +6,7 @@ This project started from a fairly simple problem: most SSH MCP wrappers tie the
 
 Persistent Terminal MCP keeps those two things separate. Interactive sessions are backed by [`pty-mcp`](https://github.com/raychao-oao/pty-mcp) and remote `ai-tmux`; structured operations use native OpenSSH. If the local MCP process disappears, the remote PTY can stay alive and be attached again later.
 
-The repository is still pre-release. The core, structured filesystem, transfer/synchronization, managed-forward and persistent-task layers are working and tested, while explicit privilege and broader system-management surfaces are still being built.
+The repository is still pre-release. The core, structured filesystem, transfer/synchronization, managed-forward, persistent-task, explicit-root and system-management layers are working and tested; deeper observability and fault-injection/deployment work remains.
 
 ## What works now
 
@@ -41,10 +41,17 @@ The repository is still pre-release. The core, structured filesystem, transfer/s
 - task recovery after local extension restart by reattaching only to the recorded live remote session
 - explicit Ctrl-C cancellation that targets only the task PTY, with optional session termination only after bounded cancellation fails
 - live proof that a running task survives an abrupt local extension process loss and completes under the original task ID without creating a duplicate remote session
+- explicit `remote_root_exec` with allowlisted best-effort root acquisition: already-root SSH, passwordless sudo, Docker host-root, secret-safe interactive sudo, then secret-safe `su - root`
+- root provider audit metadata showing every attempted strategy and the selected provider
+- secret-safe password prompts that are opened only after the upstream PTY reports an actual password prompt; password bytes never enter ordinary tool arguments, persisted state, logs or AI context
+- canonical read-only system tools: `system_info`, `process_list`, `port_list`, `service_status`, `journal_read`, `disk_usage` and `gpu_info`
+- controlled `process_signal` plus `service_start`, `service_stop` and `service_restart` operations with explicit `privilege:'user'` or `privilege:'root'`
+- no automatic privilege fallback for ordinary `remote_exec` or user-mode system mutations
+- live proof on a real Ubuntu target that ordinary execution remains non-root while explicit root execution reaches UID 0 and system inspection tools return normalized data
 - MCP output-schema checks for both successful and failed calls
 - secret-related upstream tools passed through without inspecting or rewriting their result
 
-The next work is tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md). In short: add explicit privileged operations, system helpers and deeper fault-injection/observability coverage.
+The next work is tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md). In short: add deeper observability, failure injection and deployment hardening.
 
 ## How it is put together
 
@@ -73,7 +80,7 @@ OpenSSH remains the source of truth for host configuration. Aliases, keys, ports
 - `pty-mcp` for persistent/interactive terminal tools
 - `ai-tmux` on hosts where persistent remote sessions are used
 
-Some later system-management features may also use Docker when those capabilities are explicitly enabled.
+Explicit root execution can use Docker when available and allowlisted. If automatic root providers are unavailable, the PTY upstream may display a secret-safe password dialog for sudo or the root account; those secret values are never passed as ordinary MCP tool arguments.
 
 ## Running the checks
 

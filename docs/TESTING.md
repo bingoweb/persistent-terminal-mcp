@@ -44,6 +44,7 @@ PTY_MCP_SMOKE_HOST=<ssh-alias> node test/live/filesystem-roundtrip.mjs
 PTY_MCP_SMOKE_HOST=<ssh-alias> node test/live/transfer-roundtrip.mjs
 PTY_MCP_SMOKE_HOST=<ssh-alias> node test/live/forward-roundtrip.mjs
 PTY_MCP_SMOKE_HOST=<ssh-alias> node test/live/task-recovery.mjs
+PTY_MCP_SMOKE_HOST=<ssh-alias> node test/live/root-system.mjs
 ```
 
 The filesystem round-trip goes through the extension MCP's canonical tools and verifies write/read, a rejected SHA-256 conflict with unchanged content, deterministic patching, grep/find, move/list, deletion, and failure-safe cleanup of its unique `/tmp` directory.
@@ -53,6 +54,8 @@ The transfer round-trip creates deterministic local files outside the repository
 The forward round-trip starts a temporary loopback HTTP server on the remote target, creates a named local SSH forward, performs a real HTTP fetch through the local listener, checks canonical health, proves that requesting the same healthy name reuses the same forward ID and PID, closes the forward, confirms the local listener is gone and verifies the persistent registry entry was removed. The temporary remote HTTP process is cleaned up even on failure.
 
 The task-recovery acceptance starts a roughly 45-second task that emits timestamped output, abruptly kills only the local extension process, confirms the recorded remote `ai-tmux` session remains alive, starts a new extension process against the same state file, reattaches to that exact remote session and requires `task_wait` to finish the original task ID with exit code 0. It also asserts that restart/recovery never creates a second task or remote session and cleans up the dedicated remote session afterward.
+
+The root/system acceptance proves that ordinary `remote_exec` remains non-root, then runs `remote_root_exec({command:'id -u'})` with an explicit root allowlist and requires UID 0 plus auditable provider attempts. It also runs `system_info`, `disk_usage`, `gpu_info`, and `service_status` against a harmless known service. The acceptance never starts, stops, restarts, or signals production processes/services. Password-based root providers are unit-tested with a fake upstream that requires `password_prompt`/`awaiting_secret` before `send_secret`; live acceptance uses automatic providers when available so it does not deliberately ask for a real password.
 
 ## Required negative tests for every new tool
 
