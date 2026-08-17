@@ -25,7 +25,7 @@ async function seedSession(store, overrides = {}) {
   await store.update((state) => {
     state.sessions.main = {
       name: 'main',
-      target: 'taylan',
+      target: 'test-host',
       cwd: '/srv/work',
       tags: ['primary'],
       local_session_id: 'local-old',
@@ -37,8 +37,8 @@ async function seedSession(store, overrides = {}) {
   });
 }
 
-function resolvedTarget(alias = 'taylan') {
-  return { alias, host: alias, hostname: '192.168.0.15', user: 'bingoweb', port: 22 };
+function resolvedTarget(alias = 'test-host') {
+  return { alias, host: alias, hostname: '203.0.113.10', user: 'tester', port: 22 };
 }
 
 test('healthy local session is reused without remote discovery or creation', async (t) => {
@@ -56,7 +56,7 @@ test('healthy local session is reused without remote discovery or creation', asy
   };
 
   const result = await ensureSession(
-    { name: 'main', target: 'taylan', cwd: '/srv/work', tags: ['primary'] },
+    { name: 'main', target: 'test-host', cwd: '/srv/work', tags: ['primary'] },
     { stateStore, upstreamClient, resolveTargetImpl: async () => resolvedTarget() },
   );
 
@@ -85,14 +85,14 @@ test('stale local handle reattaches to the recorded live remote session without 
       if (name === 'create_ssh_session') {
         assert.equal(args.session_id, 'remote-stable');
         assert.equal(args.persistent, true);
-        return toolResult({ session_id: 'local-new', target: 'bingoweb@taylan', type: 'remote' });
+        return toolResult({ session_id: 'local-new', target: 'tester@test-host', type: 'remote' });
       }
       throw new Error(`unexpected tool ${name}`);
     },
   };
 
   const result = await ensureSession(
-    { name: 'main', target: 'taylan' },
+    { name: 'main', target: 'test-host' },
     { stateStore, upstreamClient, resolveTargetImpl: async () => resolvedTarget() },
   );
 
@@ -131,14 +131,14 @@ test('confirmed missing remote session creates one new persistent remote PTY and
       if (name === 'create_ssh_session') {
         assert.equal(args.session_id, undefined);
         assert.equal(args.persistent, true);
-        return toolResult({ session_id: 'local-created', target: 'bingoweb@taylan', type: 'remote' });
+        return toolResult({ session_id: 'local-created', target: 'tester@test-host', type: 'remote' });
       }
       throw new Error(`unexpected tool ${name}`);
     },
   };
 
   const result = await ensureSession(
-    { name: 'main', target: 'taylan', cwd: '/srv/work', tags: ['new'] },
+    { name: 'main', target: 'test-host', cwd: '/srv/work', tags: ['new'] },
     { stateStore, upstreamClient, resolveTargetImpl: async () => resolvedTarget() },
   );
 
@@ -165,7 +165,7 @@ test('a named session cannot silently move to a different target', async (t) => 
         resolveTargetImpl: async () => resolvedTarget('other-host'),
       },
     ),
-    /already mapped.*taylan/i,
+    /already mapped.*test-host/i,
   );
 });
 

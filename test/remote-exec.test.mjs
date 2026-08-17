@@ -44,7 +44,7 @@ function fakeChild({ stdout = '', stderr = '', code = 0, closeOnSpawn = true } =
 
 test('remote_exec returns non-zero process status as a valid command result', async () => {
   const out = await remoteExec(
-    { target: 'taylan', command: 'exit 7' },
+    { target: 'test-host', command: 'exit 7' },
     { runner: fakeRunner({ code: 7, stderr: 'bad' }) },
   );
 
@@ -61,7 +61,7 @@ test('remote_exec returns non-zero process status as a valid command result', as
 test('ssh exit 255 becomes a transport/reconnect failure', async () => {
   await assert.rejects(
     () => remoteExec(
-      { target: 'taylan', command: 'true' },
+      { target: 'test-host', command: 'true' },
       { runner: fakeRunner({ code: 255, stderr: 'connection reset' }) },
     ),
     (error) => error?.category === 'transport_reconnect_failure' && /connection reset/i.test(error.message),
@@ -71,7 +71,7 @@ test('ssh exit 255 becomes a transport/reconnect failure', async () => {
 test('ssh host-key or authentication failures keep their own category', async () => {
   await assert.rejects(
     () => remoteExec(
-      { target: 'taylan', command: 'true' },
+      { target: 'test-host', command: 'true' },
       { runner: fakeRunner({ code: 255, stderr: 'Host key verification failed.' }) },
     ),
     (error) => error?.category === 'host_key_authentication_error',
@@ -89,7 +89,7 @@ test('runner preserves ssh alias and safely carries cwd env and stdin', async ()
   const resolveTargetImpl = async (alias) => ({ alias });
 
   const result = await runSshCommand(
-    'taylan',
+    'test-host',
     {
       command: "printf '%s' \"$FOO\"",
       cwd: "/tmp/dir with 'quote",
@@ -103,7 +103,7 @@ test('runner preserves ssh alias and safely carries cwd env and stdin', async ()
 
   assert.equal(invocation.command, 'ssh');
   assert.deepEqual(invocation.args.slice(0, 5), [
-    '-T', '-o', 'BatchMode=yes', 'taylan', '--',
+    '-T', '-o', 'BatchMode=yes', 'test-host', '--',
   ]);
   assert.equal(invocation.args.length, 6);
   assert.match(invocation.args[5], /^\/bin\/sh -lc '/);
@@ -115,7 +115,7 @@ test('runner preserves ssh alias and safely carries cwd env and stdin', async ()
 
 test('runner caps collected output while continuing to drain streams', async () => {
   const result = await runSshCommand(
-    'taylan',
+    'test-host',
     { command: 'big-output', max_output_bytes: 8 },
     {
       spawnImpl: () => fakeChild({ stdout: 'abcdefghij', stderr: 'KLMNOPQRST' }),
@@ -130,7 +130,7 @@ test('runner caps collected output while continuing to drain streams', async () 
 test('runner terminates a command on timeout and reports timed_out', async () => {
   const child = fakeChild({ closeOnSpawn: false });
   const result = await runSshCommand(
-    'taylan',
+    'test-host',
     { command: 'sleep 60', timeout_ms: 5 },
     {
       spawnImpl: () => child,
@@ -147,7 +147,7 @@ test('remote_exec validates target and command before invoking runner', async ()
   const runner = async () => { calls += 1; return {}; };
 
   await assert.rejects(() => remoteExec({ target: '', command: 'true' }, { runner }), /target/i);
-  await assert.rejects(() => remoteExec({ target: 'taylan', command: '' }, { runner }), /command/i);
+  await assert.rejects(() => remoteExec({ target: 'test-host', command: '' }, { runner }), /command/i);
   assert.equal(calls, 0);
 });
 
@@ -156,7 +156,7 @@ test('runner rejects invalid stdin before spawning ssh', async () => {
 
   await assert.rejects(
     () => runSshCommand(
-      'taylan',
+      'test-host',
       { command: 'cat', stdin: { unsafe: true } },
       {
         spawnImpl: () => { spawnCalls += 1; return fakeChild(); },

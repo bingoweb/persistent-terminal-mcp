@@ -55,7 +55,7 @@ test('callTool routes remote_exec locally and upstream tools unchanged', async (
   };
 
   assert.deepEqual(
-    await callTool('remote_exec', { target: 'taylan', command: 'true' }, {
+    await callTool('remote_exec', { target: 'test-host', command: 'true' }, {
       upstreamClient,
       upstreamToolNames: new Set(['create_ssh_session', ...SECRET_TOOL_NAMES]),
       remoteExecImpl: async () => localResult,

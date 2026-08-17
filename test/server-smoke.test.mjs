@@ -49,18 +49,18 @@ test('MCP initialize/list/call exposes upstream tools and remote_exec through on
 
   const local = await client.callTool({
     name: 'remote_exec',
-    arguments: { target: 'taylan', command: 'printf ok' },
+    arguments: { target: 'test-host', command: 'printf ok' },
   });
   assert.equal(local.structuredContent.stdout, 'ok');
 
   const upstream = await client.callTool({
     name: 'create_ssh_session',
-    arguments: { host: 'taylan', user: 'bingoweb' },
+    arguments: { host: 'test-host', user: 'tester' },
   });
   assert.equal(upstream.content[0].text, 'forwarded:create_ssh_session');
   assert.deepEqual(upstreamCalls, [{
     name: 'create_ssh_session',
-    args: { host: 'taylan', user: 'bingoweb' },
+    args: { host: 'test-host', user: 'tester' },
   }]);
 });
 
@@ -88,7 +88,7 @@ test('remote_exec normalized failures satisfy the advertised MCP output schema',
 
   const result = await client.callTool({
     name: 'remote_exec',
-    arguments: { target: 'taylan', command: 'true' },
+    arguments: { target: 'test-host', command: 'true' },
   });
 
   assert.equal(result.isError, true);

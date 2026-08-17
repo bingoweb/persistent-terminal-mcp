@@ -7,7 +7,7 @@ export const REMOTE_EXEC_TOOL = Object.freeze({
   inputSchema: {
     type: 'object',
     properties: {
-      target: { type: 'string', minLength: 1, description: 'Native OpenSSH host or alias, for example taylan.' },
+      target: { type: 'string', minLength: 1, description: 'Native OpenSSH host or alias, for example staging-box.' },
       command: { type: 'string', minLength: 1 },
       cwd: { type: 'string', minLength: 1 },
       env: { type: 'object', additionalProperties: { type: 'string' } },

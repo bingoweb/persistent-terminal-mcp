@@ -27,11 +27,11 @@ test('resolves alias using ssh -G while preserving alias for later commands', as
   let invocation;
   const spawnImpl = fakeSpawn(
     [
-      'host taylan',
-      'hostname 192.168.0.15',
-      'user bingoweb',
+      'host test-host',
+      'hostname 203.0.113.10',
+      'user tester',
       'port 22',
-      'identityfile ~/.ssh/id_ed25519',
+      'identityfile ~/.ssh/id_test_host',
       'proxyjump none',
       'stricthostkeychecking ask',
       'identityfile ~/.ssh/second_key',
@@ -40,15 +40,15 @@ test('resolves alias using ssh -G while preserving alias for later commands', as
     { onSpawn: (command, args) => { invocation = { command, args }; } },
   );
 
-  const target = await resolveTarget('taylan', { spawnImpl });
+  const target = await resolveTarget('test-host', { spawnImpl });
 
-  assert.deepEqual(invocation, { command: 'ssh', args: ['-G', 'taylan'] });
-  assert.equal(target.alias, 'taylan');
-  assert.equal(target.host, 'taylan');
-  assert.equal(target.hostname, '192.168.0.15');
-  assert.equal(target.user, 'bingoweb');
+  assert.deepEqual(invocation, { command: 'ssh', args: ['-G', 'test-host'] });
+  assert.equal(target.alias, 'test-host');
+  assert.equal(target.host, 'test-host');
+  assert.equal(target.hostname, '203.0.113.10');
+  assert.equal(target.user, 'tester');
   assert.equal(target.port, 22);
-  assert.equal(target.identityFile, '~/.ssh/id_ed25519');
+  assert.equal(target.identityFile, '~/.ssh/id_test_host');
   assert.equal(target.proxyJump, 'none');
   assert.equal(target.strictHostKeyChecking, 'ask');
 });
@@ -58,7 +58,7 @@ test('rejects empty and NUL-containing aliases before spawning ssh', async () =>
   const spawnImpl = () => { calls += 1; throw new Error('must not spawn'); };
 
   await assert.rejects(() => resolveTarget('', { spawnImpl }), /alias/i);
-  await assert.rejects(() => resolveTarget('taylan\0evil', { spawnImpl }), /NUL/i);
+  await assert.rejects(() => resolveTarget('test-host\0evil', { spawnImpl }), /NUL/i);
   assert.equal(calls, 0);
 });
 
