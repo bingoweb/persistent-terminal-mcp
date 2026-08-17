@@ -150,6 +150,42 @@ export function createStateStore(statePath = DEFAULT_STATE_PATH, { fsImpl = fs }
     });
   }
 
+  async function listTasks() {
+    const state = await read();
+    return Object.values(state.tasks).map((record) => structuredClone(record));
+  }
+
+  async function getTask(taskId) {
+    if (typeof taskId !== 'string' || taskId.length === 0 || taskId.includes('\0')) {
+      throw new TerminalError('validation_error', 'task_id must be a non-empty string without NUL bytes');
+    }
+    const state = await read();
+    const record = state.tasks[taskId];
+    return record === undefined ? null : structuredClone(record);
+  }
+
+  async function putTask(record) {
+    if (!record || typeof record !== 'object' || Array.isArray(record)) {
+      throw new TerminalError('validation_error', 'task record must be an object');
+    }
+    if (typeof record.task_id !== 'string' || record.task_id.length === 0 || record.task_id.includes('\0')) {
+      throw new TerminalError('validation_error', 'task record requires a non-empty task_id');
+    }
+    await update((draft) => {
+      draft.tasks[record.task_id] = structuredClone(record);
+    });
+    return structuredClone(record);
+  }
+
+  async function deleteTask(taskId) {
+    if (typeof taskId !== 'string' || taskId.length === 0 || taskId.includes('\0')) {
+      throw new TerminalError('validation_error', 'task_id must be a non-empty string without NUL bytes');
+    }
+    await update((draft) => {
+      delete draft.tasks[taskId];
+    });
+  }
+
   return {
     read,
     update,
@@ -157,5 +193,9 @@ export function createStateStore(statePath = DEFAULT_STATE_PATH, { fsImpl = fs }
     getForward,
     putForward,
     deleteForward,
+    listTasks,
+    getTask,
+    putTask,
+    deleteTask,
   };
 }
