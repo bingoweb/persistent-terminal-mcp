@@ -6,7 +6,7 @@ This project started from a fairly simple problem: most SSH MCP wrappers tie the
 
 Persistent Terminal MCP keeps those two things separate. Interactive sessions are backed by [`pty-mcp`](https://github.com/raychao-oao/pty-mcp) and remote `ai-tmux`; structured operations use native OpenSSH. If the local MCP process disappears, the remote PTY can stay alive and be attached again later.
 
-The repository is still pre-release. The core is working and tested, but the larger file-transfer, forwarding, task and system-management surface is still being built.
+The repository is still pre-release. The core, structured filesystem and transfer/synchronization layers are working and tested, while forwarding, task and system-management surfaces are still being built.
 
 ## What works now
 
@@ -25,10 +25,15 @@ The repository is still pre-release. The core is working and tested, but the lar
 - atomic UTF-8 text writes with optional SHA-256 overwrite preconditions
 - deterministic exact-hunk `remote_patch` with all-hunks-before-write validation
 - bounded, deterministic `remote_find` and regex `remote_grep` with binary-file skipping
+- path-based `remote_upload` / `remote_download` without embedding ordinary file bytes in MCP payloads
+- scp for simple copies and rsync-backed resumable transfers with bounded progress metadata
+- explicit rsync-only `remote_sync` with upload/download direction, excludes, dry-run and visible delete semantics
+- streaming local/remote SHA-256 verification with mismatch-specific integrity failures
+- observed resume reporting when a pre-existing partial remote file is actually present
 - MCP output-schema checks for both successful and failed calls
 - secret-related upstream tools passed through without inspecting or rewriting their result
 
-The next work is tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md). In short: add large/resumable transfers and synchronization, then port forwards, persistent tasks, explicit privileged operations, system helpers and deeper fault-injection testing.
+The next work is tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md). In short: add managed port forwards, then persistent tasks, explicit privileged operations, system helpers and deeper fault-injection testing.
 
 ## How it is put together
 
@@ -52,10 +57,12 @@ OpenSSH remains the source of truth for host configuration. Aliases, keys, ports
 - Node.js 22.23.1 or newer
 - OpenSSH client
 - Python 3 on remote hosts where structured filesystem tools are used
+- `rsync` locally and remotely for `remote_sync` and resumable transfers
+- `sha256sum` on remote hosts when transfer SHA-256 verification is requested
 - `pty-mcp` for persistent/interactive terminal tools
 - `ai-tmux` on hosts where persistent remote sessions are used
 
-Some later features will also use `rsync` or Docker when those capabilities are explicitly enabled.
+Some later system-management features may also use Docker when those capabilities are explicitly enabled.
 
 ## Running the checks
 
