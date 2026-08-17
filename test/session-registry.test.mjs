@@ -80,7 +80,7 @@ test('stale local handle reattaches to the recorded live remote session without 
         return toolResult({ session_id: 'local-old', is_alive: false, state: 'unknown' });
       }
       if (name === 'list_remote_sessions') {
-        return toolResult([{ session_id: 'remote-stable', status: 'running' }]);
+        return toolResult([{ id: 'remote-stable', status: 'running' }]);
       }
       if (name === 'create_ssh_session') {
         assert.equal(args.session_id, 'remote-stable');
@@ -122,16 +122,24 @@ test('confirmed missing remote session creates one new persistent remote PTY and
       if (name === 'list_remote_sessions') {
         remoteListCount += 1;
         return toolResult(remoteListCount === 1
-          ? [{ session_id: 'some-other-session', status: 'running' }]
+          ? [{ id: 'some-other-session', status: 'running' }]
           : [
-              { session_id: 'some-other-session', status: 'running' },
-              { session_id: 'remote-new', status: 'running' },
+              { id: 'some-other-session', status: 'running' },
+              { id: 'remote-new', status: 'running' },
             ]);
       }
       if (name === 'create_ssh_session') {
         assert.equal(args.session_id, undefined);
         assert.equal(args.persistent, true);
+        assert.equal(args.command, undefined, 'persistent upstream treats command as an executable path, not a shell command');
         return toolResult({ session_id: 'local-created', target: 'tester@test-host', type: 'remote' });
+      }
+      if (name === 'send_input') {
+        assert.deepEqual(args, {
+          session_id: 'local-created',
+          input: "cd '/srv/work'",
+        });
+        return toolResult({ is_complete: true });
       }
       throw new Error(`unexpected tool ${name}`);
     },
@@ -149,7 +157,79 @@ test('confirmed missing remote session creates one new persistent remote PTY and
     recovered: false,
   });
   assert.equal(remoteListCount, 2);
+  assert.equal(calls.filter((call) => call.name === 'send_input').length, 1);
   assert.equal(calls.some((call) => call.name === 'close_session'), false);
+});
+
+test('cwd initialization failure closes the just-created persistent session', async (t) => {
+  const stateStore = await makeStore(t);
+  const calls = [];
+  const upstreamClient = {
+    callTool: async (name, args) => {
+      calls.push({ name, args });
+      if (name === 'list_remote_sessions') return toolResult([]);
+      if (name === 'create_ssh_session') {
+        return toolResult({ session_id: 'local-created', target: 'tester@test-host', type: 'remote' });
+      }
+      if (name === 'send_input') {
+        return {
+          content: [{ type: 'text', text: '{"code":"INTERNAL_ERROR","message":"cd failed"}' }],
+          isError: true,
+        };
+      }
+      if (name === 'close_session') return toolResult({ success: true });
+      throw new Error(`unexpected tool ${name}`);
+    },
+  };
+
+  await assert.rejects(
+    () => ensureSession(
+      { name: 'main', target: 'test-host', cwd: '/does-not-exist' },
+      { stateStore, upstreamClient, resolveTargetImpl: async () => resolvedTarget() },
+    ),
+    /send_input.*failed/i,
+  );
+
+  assert.deepEqual(
+    calls.filter((call) => call.name === 'close_session'),
+    [{ name: 'close_session', args: { session_id: 'local-created' } }],
+  );
+  const state = await stateStore.read();
+  assert.equal(state.sessions.main, undefined);
+});
+
+test('remote id discovery failure closes the just-created persistent session', async (t) => {
+  const stateStore = await makeStore(t);
+  const calls = [];
+  let remoteListCount = 0;
+  const upstreamClient = {
+    callTool: async (name, args) => {
+      calls.push({ name, args });
+      if (name === 'list_remote_sessions') {
+        remoteListCount += 1;
+        return toolResult([]);
+      }
+      if (name === 'create_ssh_session') {
+        return toolResult({ session_id: 'local-created', target: 'tester@test-host', type: 'remote' });
+      }
+      if (name === 'close_session') return toolResult({ success: true });
+      throw new Error(`unexpected tool ${name}`);
+    },
+  };
+
+  await assert.rejects(
+    () => ensureSession(
+      { name: 'main', target: 'test-host' },
+      { stateStore, upstreamClient, resolveTargetImpl: async () => resolvedTarget() },
+    ),
+    /Could not uniquely identify the new remote ai-tmux session/i,
+  );
+
+  assert.equal(remoteListCount, 2);
+  assert.deepEqual(
+    calls.filter((call) => call.name === 'close_session'),
+    [{ name: 'close_session', args: { session_id: 'local-created' } }],
+  );
 });
 
 test('a named session cannot silently move to a different target', async (t) => {

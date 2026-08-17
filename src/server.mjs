@@ -11,6 +11,7 @@ import { remoteExec } from './remote-exec.mjs';
 export function createServer({
   upstreamClient = new PtyUpstreamClient(),
   remoteExecImpl = remoteExec,
+  sessionToolCallImpl,
 } = {}) {
   const server = new Server(
     { name: 'persistent-terminal-extended', version: '0.1.0' },
@@ -45,6 +46,7 @@ export function createServer({
       upstreamClient,
       upstreamToolNames: knownNames,
       remoteExecImpl,
+      sessionToolCallImpl,
     });
   });
 

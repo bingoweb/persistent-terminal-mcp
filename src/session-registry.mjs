@@ -73,6 +73,24 @@ function sessionIdFromResult(result, toolName = 'create_ssh_session') {
   return parsed;
 }
 
+function assertToolSuccess(result, toolName) {
+  if (result?.isError !== true) return;
+  const parsed = parseToolJson(result, toolName);
+  const detail = typeof parsed?.message === 'string' && parsed.message.length > 0
+    ? `: ${parsed.message}`
+    : '';
+  throw new TerminalError(
+    'local_capability_dependency_error',
+    `${toolName} failed${detail}`,
+  );
+}
+
+function remoteSessionId(entry) {
+  if (typeof entry?.id === 'string' && entry.id.length > 0) return entry.id;
+  if (typeof entry?.session_id === 'string' && entry.session_id.length > 0) return entry.session_id;
+  return null;
+}
+
 async function remoteSessions(upstreamClient, target) {
   const result = await upstreamClient.callTool('list_remote_sessions', {
     host: target.alias,
@@ -96,12 +114,6 @@ async function localSessionAlive(upstreamClient, localSessionId) {
   } catch {
     return false;
   }
-}
-
-function initialCommand(cwd) {
-  if (!cwd) return undefined;
-  const inner = `cd ${quotePosix(cwd)} && exec /bin/bash`;
-  return `/bin/bash -lc ${quotePosix(inner)}`;
 }
 
 async function writeSession(stateStore, name, entry) {
@@ -131,37 +143,48 @@ async function reattachRemote({ upstreamClient, target, remoteSessionId }) {
 
 async function createPersistentRemote({ upstreamClient, target, cwd, beforeSessions }) {
   const before = beforeSessions ?? await remoteSessions(upstreamClient, target);
-  const beforeIds = new Set(before.map((item) => item?.session_id).filter(Boolean));
+  const beforeIds = new Set(before.map(remoteSessionId).filter(Boolean));
 
   const args = {
     host: target.alias,
     user: target.user,
     persistent: true,
   };
-  const command = initialCommand(cwd);
-  if (command) args.command = command;
 
   const createdResult = await upstreamClient.callTool('create_ssh_session', args);
   const created = sessionIdFromResult(createdResult);
 
-  if (typeof created.remote_session_id === 'string' && created.remote_session_id.length > 0) {
-    return { localSessionId: created.session_id, remoteSessionId: created.remote_session_id };
+  try {
+    if (cwd) {
+      const cwdResult = await upstreamClient.callTool('send_input', {
+        session_id: created.session_id,
+        input: `cd ${quotePosix(cwd)}`,
+      });
+      assertToolSuccess(cwdResult, 'send_input');
+    }
+
+    if (typeof created.remote_session_id === 'string' && created.remote_session_id.length > 0) {
+      return { localSessionId: created.session_id, remoteSessionId: created.remote_session_id };
+    }
+
+    const after = await remoteSessions(upstreamClient, target);
+    const newRemoteIds = after
+      .map(remoteSessionId)
+      .filter((id) => typeof id === 'string' && !beforeIds.has(id));
+
+    if (newRemoteIds.length !== 1) {
+      throw new TerminalError(
+        'missing_remote_capability',
+        `Could not uniquely identify the new remote ai-tmux session (${newRemoteIds.length} candidates)`,
+        { details: { candidates: newRemoteIds } },
+      );
+    }
+
+    return { localSessionId: created.session_id, remoteSessionId: newRemoteIds[0] };
+  } catch (error) {
+    await upstreamClient.callTool('close_session', { session_id: created.session_id }).catch(() => {});
+    throw error;
   }
-
-  const after = await remoteSessions(upstreamClient, target);
-  const newRemoteIds = after
-    .map((item) => item?.session_id)
-    .filter((id) => typeof id === 'string' && !beforeIds.has(id));
-
-  if (newRemoteIds.length !== 1) {
-    throw new TerminalError(
-      'missing_remote_capability',
-      `Could not uniquely identify the new remote ai-tmux session (${newRemoteIds.length} candidates)`,
-      { details: { candidates: newRemoteIds } },
-    );
-  }
-
-  return { localSessionId: created.session_id, remoteSessionId: newRemoteIds[0] };
 }
 
 export async function ensureSession(
@@ -205,7 +228,7 @@ export async function ensureSession(
   if (existing?.remote_session_id) {
     const remotes = await remoteSessions(upstreamClient, resolved);
     confirmedRemoteSnapshot = remotes;
-    const remoteExists = remotes.some((item) => item?.session_id === existing.remote_session_id);
+    const remoteExists = remotes.some((item) => remoteSessionId(item) === existing.remote_session_id);
 
     if (remoteExists) {
       const localSessionId = await reattachRemote({
