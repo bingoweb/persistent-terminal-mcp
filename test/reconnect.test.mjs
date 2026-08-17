@@ -92,6 +92,40 @@ test('reconnect uses bounded exponential backoff with jitter and caps the delay'
   });
 });
 
+test('reconnect writes bounded operational events through the injected logger without tool arguments', async () => {
+  const { FakeClient } = clientFactory([
+    { connectError: new Error('first connect failed password=do-not-log') },
+    {},
+  ]);
+  const events = [];
+  const logger = {
+    info: async (event, data) => { events.push({ level: 'info', event, data }); },
+    warn: async (event, data) => { events.push({ level: 'warn', event, data }); },
+  };
+  const client = new PtyUpstreamClient({
+    ClientImpl: FakeClient,
+    TransportImpl: FakeTransport,
+    logger,
+    sleepImpl: async () => {},
+    randomImpl: () => 0.5,
+    reconnect: { maxAttempts: 2, baseDelayMs: 1, maxDelayMs: 2, jitterRatio: 0 },
+  });
+
+  await client.listTools();
+
+  assert.deepEqual(events.map(({ level, event }) => ({ level, event })), [
+    { level: 'info', event: 'upstream_reconnect_attempt' },
+    { level: 'warn', event: 'upstream_reconnect_failure' },
+    { level: 'info', event: 'upstream_reconnect_attempt' },
+    { level: 'info', event: 'upstream_reconnect_success' },
+  ]);
+  assert.deepEqual(events[0].data, { attempt: 1, max_attempts: 2 });
+  assert.deepEqual(events[2].data, { attempt: 2, max_attempts: 2 });
+  assert.equal(events[1].data.attempt, 1);
+  assert.equal(events[1].data.error instanceof Error, true);
+  assert.equal('arguments' in events[1].data, false);
+});
+
 test('concurrent callers share one reconnect promise instead of launching a reconnect storm', async () => {
   let releaseSleep;
   const sleepGate = new Promise((resolve) => { releaseSleep = resolve; });

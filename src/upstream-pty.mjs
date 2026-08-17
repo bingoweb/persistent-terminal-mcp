@@ -3,6 +3,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 import { terminalDiagnostics } from './diagnostics.mjs';
 import { TerminalError } from './errors.mjs';
+import { VERSION } from './version.mjs';
 
 const DEFAULT_UPSTREAM_URL = 'http://127.0.0.1:9021/mcp';
 const DEFAULT_RECONNECT = Object.freeze({
@@ -70,6 +71,7 @@ export class PtyUpstreamClient {
     ClientImpl = Client,
     TransportImpl = StreamableHTTPClientTransport,
     diagnostics = terminalDiagnostics,
+    logger = null,
     sleepImpl = delay,
     randomImpl = Math.random,
     reconnect = {},
@@ -78,6 +80,7 @@ export class PtyUpstreamClient {
     this.ClientImpl = ClientImpl;
     this.TransportImpl = TransportImpl;
     this.diagnostics = diagnostics;
+    this.logger = logger;
     this.sleepImpl = sleepImpl;
     this.randomImpl = randomImpl;
     this.reconnect = validateReconnect(reconnect);
@@ -86,6 +89,14 @@ export class PtyUpstreamClient {
     this.reconnectPromise = null;
     this.backoffLevel = 0;
     this.closed = false;
+  }
+
+  async log(level, event, data = {}) {
+    try {
+      await this.logger?.[level]?.(event, data);
+    } catch {
+      // Diagnostics must never become a transport failure domain.
+    }
   }
 
   backoffDelay() {
@@ -114,7 +125,7 @@ export class PtyUpstreamClient {
   async connectAttempt() {
     const client = new this.ClientImpl({
       name: 'persistent-terminal-extended-upstream',
-      version: '0.1.0',
+      version: VERSION,
     });
     const transport = new this.TransportImpl(new URL(this.url));
     try {
@@ -131,16 +142,29 @@ export class PtyUpstreamClient {
     let lastError;
     for (let attempt = 1; attempt <= this.reconnect.maxAttempts; attempt += 1) {
       this.diagnostics?.recordReconnectAttempt?.();
+      await this.log('info', 'upstream_reconnect_attempt', {
+        attempt,
+        max_attempts: this.reconnect.maxAttempts,
+      });
       try {
         const connected = await this.connectAttempt();
         this.client = connected.client;
         this.transport = connected.transport;
         this.diagnostics?.recordReconnectSuccess?.();
+        await this.log('info', 'upstream_reconnect_success', {
+          attempt,
+          max_attempts: this.reconnect.maxAttempts,
+        });
         return this.client;
       } catch (error) {
         lastError = error;
         this.diagnostics?.recordReconnectFailure?.();
         this.diagnostics?.recordFailure?.('transport_reconnect_failure');
+        await this.log('warn', 'upstream_reconnect_failure', {
+          attempt,
+          max_attempts: this.reconnect.maxAttempts,
+          error,
+        });
         if (attempt >= this.reconnect.maxAttempts) break;
         const waitMs = this.backoffDelay();
         this.backoffLevel = Math.min(this.backoffLevel + 1, 30);

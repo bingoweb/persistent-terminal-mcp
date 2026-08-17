@@ -5,8 +5,8 @@ import { remoteExec } from './remote-exec.mjs';
 import { createStateStore } from './state-store.mjs';
 import { resolveTarget } from './target-resolver.mjs';
 import { PtyUpstreamClient } from './upstream-pty.mjs';
+import { VERSION } from './version.mjs';
 
-const EXTENSION_VERSION = '0.1.0';
 const DEFAULT_GATEWAY_HEALTH_URL = 'http://127.0.0.1:9022/healthz';
 const defaultStateStore = createStateStore();
 const defaultUpstreamClient = new PtyUpstreamClient();
@@ -289,7 +289,7 @@ async function inspectTarget(
 export async function getTerminalHealth(
   request = {},
   {
-    extensionVersion = EXTENSION_VERSION,
+    extensionVersion = VERSION,
     diagnostics = terminalDiagnostics,
     upstreamClient = defaultUpstreamClient,
     stateStore = defaultStateStore,

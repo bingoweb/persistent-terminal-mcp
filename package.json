@@ -1,9 +1,20 @@
 {
   "name": "persistent-terminal-mcp",
-  "version": "0.1.0",
+  "version": "0.9.0",
   "description": "A resilient MCP server for persistent remote terminals, structured OpenSSH operations, recovery, and advanced remote administration.",
   "type": "module",
   "private": true,
+  "files": [
+    "src/",
+    "helpers/",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "SECURITY.md",
+    "THIRD_PARTY_LICENSES.md",
+    "THIRD_PARTY_NOTICES.md",
+    "docs/"
+  ],
   "license": "Apache-2.0",
   "author": "Taylan Soylu",
   "repository": {
@@ -25,6 +36,8 @@
     "test": "node --test test/*.test.mjs",
     "check": "node scripts/check-source.mjs",
     "licenses:check": "node scripts/check-third-party-licenses.mjs",
-    "quality": "npm run check && npm test && npm run licenses:check"
+    "quality": "npm run check && npm test && npm run licenses:check",
+    "release:check": "node scripts/check-release.mjs",
+    "release:artifacts": "node scripts/build-release-artifacts.mjs"
   }
 }
