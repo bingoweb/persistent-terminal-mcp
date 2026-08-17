@@ -114,5 +114,48 @@ export function createStateStore(statePath = DEFAULT_STATE_PATH, { fsImpl = fs }
     return queued;
   }
 
-  return { read, update };
+  async function listForwards() {
+    const state = await read();
+    return Object.values(state.forwards).map((record) => structuredClone(record));
+  }
+
+  async function getForward(forwardId) {
+    if (typeof forwardId !== 'string' || forwardId.length === 0 || forwardId.includes('\0')) {
+      throw new TerminalError('validation_error', 'forward_id must be a non-empty string without NUL bytes');
+    }
+    const state = await read();
+    const record = state.forwards[forwardId];
+    return record === undefined ? null : structuredClone(record);
+  }
+
+  async function putForward(record) {
+    if (!record || typeof record !== 'object' || Array.isArray(record)) {
+      throw new TerminalError('validation_error', 'forward record must be an object');
+    }
+    if (typeof record.forward_id !== 'string' || record.forward_id.length === 0 || record.forward_id.includes('\0')) {
+      throw new TerminalError('validation_error', 'forward record requires a non-empty forward_id');
+    }
+    await update((draft) => {
+      draft.forwards[record.forward_id] = structuredClone(record);
+    });
+    return structuredClone(record);
+  }
+
+  async function deleteForward(forwardId) {
+    if (typeof forwardId !== 'string' || forwardId.length === 0 || forwardId.includes('\0')) {
+      throw new TerminalError('validation_error', 'forward_id must be a non-empty string without NUL bytes');
+    }
+    await update((draft) => {
+      delete draft.forwards[forwardId];
+    });
+  }
+
+  return {
+    read,
+    update,
+    listForwards,
+    getForward,
+    putForward,
+    deleteForward,
+  };
 }

@@ -1,4 +1,5 @@
 import { TerminalError, normalizeFailure } from './errors.mjs';
+import { FORWARD_TOOLS, FORWARD_TOOL_NAMES, callForwardTool } from './forward-tools.mjs';
 import { buildLegacyAliasTools, resolveLegacyAliasCall } from './legacy-aliases.mjs';
 import { remoteExec } from './remote-exec.mjs';
 import { REMOTE_FS_TOOLS, REMOTE_FS_TOOL_NAMES, callRemoteFsTool } from './remote-fs-tools.mjs';
@@ -74,6 +75,7 @@ export const LOCAL_TOOLS = Object.freeze([
   ...SESSION_TOOLS,
   ...REMOTE_FS_TOOLS,
   ...TRANSFER_TOOLS,
+  ...FORWARD_TOOLS,
 ]);
 
 export function buildToolCatalog({ upstreamTools = [], localTools = LOCAL_TOOLS } = {}) {
@@ -120,6 +122,7 @@ export async function callTool(
     sessionToolCallImpl = callSessionTool,
     remoteFsToolCallImpl = callRemoteFsTool,
     transferToolCallImpl = callTransferTool,
+    forwardToolCallImpl = callForwardTool,
   },
 ) {
   if (name === REMOTE_EXEC_TOOL.name) {
@@ -151,6 +154,10 @@ export async function callTool(
     return transferToolCallImpl(name, args ?? {});
   }
 
+  if (FORWARD_TOOL_NAMES.has(name)) {
+    return forwardToolCallImpl(name, args ?? {});
+  }
+
   const legacy = resolveLegacyAliasCall(name, args ?? {});
   if (legacy) {
     return callTool(legacy.target, legacy.args, {
@@ -160,6 +167,7 @@ export async function callTool(
       sessionToolCallImpl,
       remoteFsToolCallImpl,
       transferToolCallImpl,
+      forwardToolCallImpl,
     });
   }
 
