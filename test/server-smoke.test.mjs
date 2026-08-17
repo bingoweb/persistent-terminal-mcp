@@ -134,3 +134,35 @@ test('remote_exec normalized failures satisfy the advertised MCP output schema',
     retryable: false,
   });
 });
+
+test('createServer routes task tools through an injected task handler', async (t) => {
+  const taskCalls = [];
+  const server = createServer({
+    upstreamClient: {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => { throw new Error('must not call upstream'); },
+    },
+    taskToolCallImpl: async (name, args) => {
+      taskCalls.push({ name, args });
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ tasks: [] }) }],
+        structuredContent: { tasks: [] },
+      };
+    },
+  });
+  const client = new Client({ name: 'persistent-terminal-task-injection-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  t.after(async () => {
+    await client.close();
+    await server.close();
+  });
+
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  await client.listTools();
+
+  const result = await client.callTool({ name: 'task_list', arguments: {} });
+  assert.deepEqual(result.structuredContent, { tasks: [] });
+  assert.deepEqual(taskCalls, [{ name: 'task_list', args: {} }]);
+});

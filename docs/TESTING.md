@@ -43,6 +43,7 @@ PTY_MCP_SMOKE_HOST=<ssh-alias> node test/live/session-recovery.mjs
 PTY_MCP_SMOKE_HOST=<ssh-alias> node test/live/filesystem-roundtrip.mjs
 PTY_MCP_SMOKE_HOST=<ssh-alias> node test/live/transfer-roundtrip.mjs
 PTY_MCP_SMOKE_HOST=<ssh-alias> node test/live/forward-roundtrip.mjs
+PTY_MCP_SMOKE_HOST=<ssh-alias> node test/live/task-recovery.mjs
 ```
 
 The filesystem round-trip goes through the extension MCP's canonical tools and verifies write/read, a rejected SHA-256 conflict with unchanged content, deterministic patching, grep/find, move/list, deletion, and failure-safe cleanup of its unique `/tmp` directory.
@@ -50,6 +51,8 @@ The filesystem round-trip goes through the extension MCP's canonical tools and v
 The transfer round-trip creates deterministic local files outside the repository, verifies a 32 MiB upload/download with SHA-256, intentionally interrupts a larger rsync so a real partial remote file remains, confirms the canonical resume path reports `resumed:true`, and exercises `remote_sync` dry-run, excludes and delete semantics. Both local and remote temporary artifacts are removed on completion or failure.
 
 The forward round-trip starts a temporary loopback HTTP server on the remote target, creates a named local SSH forward, performs a real HTTP fetch through the local listener, checks canonical health, proves that requesting the same healthy name reuses the same forward ID and PID, closes the forward, confirms the local listener is gone and verifies the persistent registry entry was removed. The temporary remote HTTP process is cleaned up even on failure.
+
+The task-recovery acceptance starts a roughly 45-second task that emits timestamped output, abruptly kills only the local extension process, confirms the recorded remote `ai-tmux` session remains alive, starts a new extension process against the same state file, reattaches to that exact remote session and requires `task_wait` to finish the original task ID with exit code 0. It also asserts that restart/recovery never creates a second task or remote session and cleans up the dedicated remote session afterward.
 
 ## Required negative tests for every new tool
 

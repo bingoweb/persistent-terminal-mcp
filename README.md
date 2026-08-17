@@ -6,7 +6,7 @@ This project started from a fairly simple problem: most SSH MCP wrappers tie the
 
 Persistent Terminal MCP keeps those two things separate. Interactive sessions are backed by [`pty-mcp`](https://github.com/raychao-oao/pty-mcp) and remote `ai-tmux`; structured operations use native OpenSSH. If the local MCP process disappears, the remote PTY can stay alive and be attached again later.
 
-The repository is still pre-release. The core, structured filesystem, transfer/synchronization and managed-forward layers are working and tested, while task and system-management surfaces are still being built.
+The repository is still pre-release. The core, structured filesystem, transfer/synchronization, managed-forward and persistent-task layers are working and tested, while explicit privilege and broader system-management surfaces are still being built.
 
 ## What works now
 
@@ -35,10 +35,16 @@ The repository is still pre-release. The core, structured filesystem, transfer/s
 - forward lifecycle state persisted only after bounded startup and process-identity capture
 - identity-safe close semantics that re-check the recorded process before SIGTERM and before any SIGKILL
 - real local TCP and remote `ss` listener health checks rather than PID-only forward status
+- persistent long-running remote tasks with stable task IDs and dedicated recorded remote PTY sessions
+- canonical `task_start`, `task_status`, `task_output`, `task_wait`, `task_cancel` and `task_list` lifecycle tools
+- bounded incremental task output and anchored non-spoofable completion-marker waits
+- task recovery after local extension restart by reattaching only to the recorded live remote session
+- explicit Ctrl-C cancellation that targets only the task PTY, with optional session termination only after bounded cancellation fails
+- live proof that a running task survives an abrupt local extension process loss and completes under the original task ID without creating a duplicate remote session
 - MCP output-schema checks for both successful and failed calls
 - secret-related upstream tools passed through without inspecting or rewriting their result
 
-The next work is tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md). In short: add persistent tasks, then explicit privileged operations, system helpers and deeper fault-injection testing.
+The next work is tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md). In short: add explicit privileged operations, system helpers and deeper fault-injection/observability coverage.
 
 ## How it is put together
 

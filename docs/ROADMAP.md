@@ -79,9 +79,9 @@ Health combines process identity with actual listener state. Local and dynamic f
 
 Live acceptance starts a temporary loopback HTTP service on a real remote target, creates a named local forward, fetches HTTP through it, verifies healthy status and named reuse with the same ID/PID, closes it, confirms the listener is gone and verifies the persistent registry no longer contains the forward.
 
-## M6 — Persistent task manager
+## M6 — Persistent task manager — implemented
 
-Planned tools:
+Implemented tools:
 
 ```text
 task_start
@@ -92,7 +92,13 @@ task_cancel
 task_list
 ```
 
-Tasks must survive local MCP disconnect/restart when backed by a persistent remote session.
+Each task runs in its own recorded persistent remote PTY and has a stable task ID plus persisted lifecycle state. Command text is carried as base64 data into a fixed wrapper rather than interpolated into generated shell source, and completion is recognized only through an anchored random marker.
+
+`task_output` reads bounded incremental output from the stored cursor. `task_wait` drains buffered output and then performs one bounded upstream `wait_for` operation instead of rapid polling. A stale local extension handle reattaches only to the task's recorded live remote session; if that remote session is gone, a running task becomes `lost` rather than silently creating a replacement.
+
+Cancellation sends Ctrl-C only to the verified recorded task PTY. `terminate_session:true` is explicit and closes only that dedicated session, and only after the bounded normal cancellation attempt fails.
+
+Live acceptance starts a roughly 45-second timestamped task, abruptly kills the local extension process, restarts it with the same persisted state, recovers the original remote session, waits for the original task ID to exit successfully, and proves that recovery did not create a second task or remote session.
 
 ## M7 — Explicit privilege and system helpers
 

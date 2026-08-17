@@ -13,6 +13,7 @@ export function createServer({
   remoteExecImpl = remoteExec,
   sessionToolCallImpl,
   remoteFsToolCallImpl,
+  taskToolCallImpl,
 } = {}) {
   const server = new Server(
     { name: 'persistent-terminal-extended', version: '0.1.0' },
@@ -49,6 +50,7 @@ export function createServer({
       remoteExecImpl,
       sessionToolCallImpl,
       remoteFsToolCallImpl,
+      taskToolCallImpl,
     });
   });
 
