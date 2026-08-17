@@ -1,0 +1,18 @@
+node_modules/
+coverage/
+.nyc_output/
+*.log
+*.pid
+.env
+.env.*
+!.env.example
+.DS_Store
+
+# Local Persistent Terminal state must never be committed.
+.state/
+state.json
+*.state.json
+
+# Temporary transfer/task artifacts.
+*.part
+*.tmp
