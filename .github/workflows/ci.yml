@@ -45,3 +45,18 @@ jobs:
       - name: Verify package contents
         if: matrix.os == 'ubuntu-latest' && matrix.node == '24.x'
         run: npm pack --dry-run
+
+  required:
+    name: required
+    if: always()
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce matrix success
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+        run: |
+          test "$QUALITY_RESULT" = "success" || {
+            echo "Quality matrix result: $QUALITY_RESULT"
+            exit 1
+          }
