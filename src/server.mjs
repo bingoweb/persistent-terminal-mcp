@@ -12,6 +12,7 @@ export function createServer({
   upstreamClient = new PtyUpstreamClient(),
   remoteExecImpl = remoteExec,
   sessionToolCallImpl,
+  remoteFsToolCallImpl,
 } = {}) {
   const server = new Server(
     { name: 'persistent-terminal-extended', version: '0.1.0' },
@@ -47,6 +48,7 @@ export function createServer({
       upstreamToolNames: knownNames,
       remoteExecImpl,
       sessionToolCallImpl,
+      remoteFsToolCallImpl,
     });
   });
 

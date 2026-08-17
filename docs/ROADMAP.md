@@ -12,7 +12,7 @@ This roadmap distinguishes implemented behavior from planned work. A milestone i
 - combined upstream PTY + extension MCP catalog;
 - MCP output-schema regression coverage.
 
-## M2 — Named persistent sessions — in progress
+## M2 — Named persistent sessions — implemented
 
 - atomic state store — implemented;
 - recovery decision engine — implemented;
@@ -21,9 +21,9 @@ This roadmap distinguishes implemented behavior from planned work. A milestone i
 - selected deprecated `ssh_*` compatibility aliases;
 - live local-process restart / same-remote-ID recovery proof.
 
-## M3 — Structured remote filesystem
+## M3 — Structured remote filesystem — implemented
 
-Planned tools:
+Implemented tools:
 
 ```text
 remote_stat
@@ -38,7 +38,9 @@ remote_find
 remote_grep
 ```
 
-Writes will be atomic where applicable; binary/text distinctions and deterministic patch semantics are required.
+The filesystem protocol sends paths and text as structured JSON data rather than caller-built shell source. UTF-8 writes use same-directory temporary files, `fsync`, and atomic replace semantics; optional SHA-256 preconditions prevent blind overwrites. `remote_patch` validates every exact hunk before writing. `remote_find` and `remote_grep` use deterministic bounded traversal, do not follow directory symlinks by default, and report truncation explicitly. Text search skips binary files and reports the skipped count.
+
+Live acceptance covers write/read, SHA-256 conflict preservation, patch, grep, find, move, list and cleanup against a real OpenSSH target.
 
 ## M4 — Transfer and synchronization
 

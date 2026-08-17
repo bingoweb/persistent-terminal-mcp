@@ -18,13 +18,17 @@ The repository is still pre-release. The core is working and tested, but the lar
 - transport failures kept separate from ordinary non-zero process exits
 - host-key/authentication failures kept separate from reconnect failures
 - atomic local state storage
-- named-session recovery logic
+- canonical named-session create/recover, list, detach and close tools
 - stale local handle cleanup without killing the remote PTY
 - reattach to an existing remote session before creating a replacement
+- structured remote stat/list/read/write/mkdir/move/delete operations without caller-side shell quoting
+- atomic UTF-8 text writes with optional SHA-256 overwrite preconditions
+- deterministic exact-hunk `remote_patch` with all-hunks-before-write validation
+- bounded, deterministic `remote_find` and regex `remote_grep` with binary-file skipping
 - MCP output-schema checks for both successful and failed calls
 - secret-related upstream tools passed through without inspecting or rewriting their result
 
-The next work is tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md). In short: finish the public named-session tools, then add structured remote files, large/resumable transfers, port forwards, persistent tasks, explicit privileged operations, system helpers and deeper fault-injection testing.
+The next work is tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md). In short: add large/resumable transfers and synchronization, then port forwards, persistent tasks, explicit privileged operations, system helpers and deeper fault-injection testing.
 
 ## How it is put together
 
@@ -47,6 +51,7 @@ OpenSSH remains the source of truth for host configuration. Aliases, keys, ports
 
 - Node.js 22.23.1 or newer
 - OpenSSH client
+- Python 3 on remote hosts where structured filesystem tools are used
 - `pty-mcp` for persistent/interactive terminal tools
 - `ai-tmux` on hosts where persistent remote sessions are used
 

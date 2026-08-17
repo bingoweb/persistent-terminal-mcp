@@ -36,6 +36,15 @@ Exercise a live loopback `pty-mcp` endpoint when available and verify that upstr
 
 Live tests are opt-in and must use environment variables rather than committed private target details. They verify actual OpenSSH behavior, persistent `ai-tmux` recovery, transfer integrity, forwarding, task survival, and privileged providers.
 
+Current live acceptance entry points include:
+
+```bash
+PTY_MCP_SMOKE_HOST=<ssh-alias> node test/live/session-recovery.mjs
+PTY_MCP_SMOKE_HOST=<ssh-alias> node test/live/filesystem-roundtrip.mjs
+```
+
+The filesystem round-trip goes through the extension MCP's canonical tools and verifies write/read, a rejected SHA-256 conflict with unchanged content, deterministic patching, grep/find, move/list, deletion, and failure-safe cleanup of its unique `/tmp` directory.
+
 ## Required negative tests for every new tool
 
 Every externally exposed operation should cover, where relevant:
