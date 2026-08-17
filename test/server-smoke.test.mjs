@@ -5,6 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
 import { createServer } from '../src/server.mjs';
+import { TerminalError } from '../src/errors.mjs';
 
 test('MCP initialize/list/call exposes upstream tools and remote_exec through one server', async (t) => {
   const upstreamCalls = [];
@@ -61,4 +62,39 @@ test('MCP initialize/list/call exposes upstream tools and remote_exec through on
     name: 'create_ssh_session',
     args: { host: 'taylan', user: 'bingoweb' },
   }]);
+});
+
+test('remote_exec normalized failures satisfy the advertised MCP output schema', async (t) => {
+  const server = createServer({
+    upstreamClient: {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => { throw new Error('must not call upstream'); },
+    },
+    remoteExecImpl: async () => {
+      throw new TerminalError('validation_error', 'bad input', { retryable: false });
+    },
+  });
+  const client = new Client({ name: 'persistent-terminal-error-schema-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  t.after(async () => {
+    await client.close();
+    await server.close();
+  });
+
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  await client.listTools();
+
+  const result = await client.callTool({
+    name: 'remote_exec',
+    arguments: { target: 'taylan', command: 'true' },
+  });
+
+  assert.equal(result.isError, true);
+  assert.deepEqual(result.structuredContent, {
+    category: 'validation_error',
+    message: 'bad input',
+    retryable: false,
+  });
 });

@@ -20,16 +20,48 @@ export const REMOTE_EXEC_TOOL = Object.freeze({
   },
   outputSchema: {
     type: 'object',
-    properties: {
-      exit_code: { type: ['integer', 'null'] },
-      stdout: { type: 'string' },
-      stderr: { type: 'string' },
-      duration_ms: { type: 'number' },
-      timed_out: { type: 'boolean' },
-      truncated: { type: 'boolean' },
-    },
-    required: ['exit_code', 'stdout', 'stderr', 'duration_ms', 'timed_out', 'truncated'],
-    additionalProperties: false,
+    oneOf: [
+      {
+        type: 'object',
+        properties: {
+          exit_code: { type: ['integer', 'null'] },
+          stdout: { type: 'string' },
+          stderr: { type: 'string' },
+          duration_ms: { type: 'number' },
+          timed_out: { type: 'boolean' },
+          truncated: { type: 'boolean' },
+        },
+        required: ['exit_code', 'stdout', 'stderr', 'duration_ms', 'timed_out', 'truncated'],
+        additionalProperties: false,
+      },
+      {
+        type: 'object',
+        properties: {
+          category: {
+            type: 'string',
+            enum: [
+              'validation_error',
+              'target_resolution_error',
+              'host_key_authentication_error',
+              'transport_reconnect_failure',
+              'timeout',
+              'remote_command_nonzero_exit',
+              'missing_remote_capability',
+              'local_capability_dependency_error',
+              'stale_session_task_forward_id',
+              'permission_privilege_error',
+              'checksum_integrity_failure',
+              'binary_file',
+            ],
+          },
+          message: { type: 'string' },
+          retryable: { type: 'boolean' },
+          details: {},
+        },
+        required: ['category', 'message', 'retryable'],
+        additionalProperties: false,
+      },
+    ],
   },
 });
 

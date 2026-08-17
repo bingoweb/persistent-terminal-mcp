@@ -150,3 +150,21 @@ test('remote_exec validates target and command before invoking runner', async ()
   await assert.rejects(() => remoteExec({ target: 'taylan', command: '' }, { runner }), /command/i);
   assert.equal(calls, 0);
 });
+
+test('runner rejects invalid stdin before spawning ssh', async () => {
+  let spawnCalls = 0;
+
+  await assert.rejects(
+    () => runSshCommand(
+      'taylan',
+      { command: 'cat', stdin: { unsafe: true } },
+      {
+        spawnImpl: () => { spawnCalls += 1; return fakeChild(); },
+        resolveTargetImpl: async (alias) => ({ alias }),
+      },
+    ),
+    /stdin must be a string or Buffer/i,
+  );
+
+  assert.equal(spawnCalls, 0);
+});

@@ -95,6 +95,13 @@ export async function runSshCommand(
     'max_output_bytes',
     DEFAULT_MAX_OUTPUT_BYTES,
   );
+  if (
+    request.stdin !== undefined
+    && typeof request.stdin !== 'string'
+    && !Buffer.isBuffer(request.stdin)
+  ) {
+    throw new TerminalError('validation_error', 'stdin must be a string or Buffer');
+  }
   const remoteScript = buildRemoteScript(request);
   const remoteCommand = `/bin/sh -lc ${quotePosix(remoteScript)}`;
   const target = await resolveTargetImpl(targetAlias);
@@ -138,11 +145,6 @@ export async function runSshCommand(
   }, timeoutMs);
 
   if (request.stdin !== undefined) {
-    if (typeof request.stdin !== 'string' && !Buffer.isBuffer(request.stdin)) {
-      clearTimeoutImpl(timer);
-      child.kill('SIGTERM');
-      throw new TerminalError('validation_error', 'stdin must be a string or Buffer');
-    }
     child.stdin.end(request.stdin);
   } else {
     child.stdin.end();
