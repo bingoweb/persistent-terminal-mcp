@@ -47,6 +47,14 @@ PTY_MCP_SMOKE_HOST=<ssh-alias> node test/live/task-recovery.mjs
 PTY_MCP_SMOKE_HOST=<ssh-alias> node test/live/root-system.mjs
 ```
 
+The repository-level end-to-end acceptance harness is run from the parent deployment workspace:
+
+```bash
+PTY_MCP_SMOKE_HOST=<ssh-alias> PTY_MCP_SMOKE_USER=<user> node tests/persistent-terminal-extended-acceptance.mjs
+```
+
+It contains exactly 15 named phases and additionally failure-injects independent extension and gateway restarts while persistent remote session/task work is active. A successful run ends with `PERSISTENT_TERMINAL_EXTENDED_ACCEPTANCE_OK phases=15` and verifies that the remote-session baseline is restored after cleanup.
+
 The filesystem round-trip goes through the extension MCP's canonical tools and verifies write/read, a rejected SHA-256 conflict with unchanged content, deterministic patching, grep/find, move/list, deletion, and failure-safe cleanup of its unique `/tmp` directory.
 
 The transfer round-trip creates deterministic local files outside the repository, verifies a 32 MiB upload/download with SHA-256, intentionally interrupts a larger rsync so a real partial remote file remains, confirms the canonical resume path reports `resumed:true`, and exercises `remote_sync` dry-run, excludes and delete semantics. Both local and remote temporary artifacts are removed on completion or failure.
